@@ -38,9 +38,12 @@ First, importing the clean phyloseq
 No. taxa = 104611
 No. samples = 2082
 No. variables = 34
+
 ```{r}
 # Load cleaned phyloseq object
-ps_cleaned <- readRDS("C:/Anna_Maria_IEO/thesis/tables/Anna_Maria_cleaned_phyloseq.rds")
+ps_cleaned <- readRDS("data/Anna_Maria_cleaned_phyloseq.rds")
+PO.mod <- readRDS("data/PO.mod.rds")
+t1 <- readRDS("data/t1.rds")
 
 # Remove samples from unwanted project
 ps_cleaned <- subset_samples(ps_cleaned, Project != "BiophysMoorings")
