@@ -1,1 +1,549 @@
+#alpha diversity
+```{r}
 
+EEZ_euphotic_heter <-  ps_protist_heter %>%  subset_samples(photic_zone== "Euphotic")
+
+EEZ_euphotic_autot <-  ps_protist_autot %>%  subset_samples(photic_zone== "Euphotic")
+
+STW_euphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Euphotic") 
+
+STF_euphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Euphotic") 
+
+SAW_euphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Euphotic") 
+
+
+
+```
+# Creating lists for some specific cases - WATER MASSES - APHOTIC
+
+
+```{r pressure, echo=FALSE}
+
+EEZ_aphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Aphotic")
+
+STW_aphotic <- ps_protist_heter %>%  subset_samples(photic_zone== "Aphotic") 
+
+STF_aphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Aphotic") 
+
+SAW_aphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Aphotic") 
+
+
+```
+
+```{r}
+#### WATER MASS  & AREA DIVERSITY
+
+## EUPHOTIC - Water mass - FIGURE 3
+
+# Remove samples with NA in 'Area'
+ps_protist_heter_clean <- subset_samples(ps_protist_heter, !is.na(Area))
+ps_protist_heter_clean <- subset_samples(ps_protist_heter_clean, !is.na(Season))
+ps_protist_heter_clean <- subset_samples(ps_protist_heter_clean, !is.na(photic_zone))
+
+# Use euphotic or all (euphotic + aphotic)
+
+CairoPDF(file = "Protist.Diversity_HET_Water.Mass", width = 10, height = 5) 
+    plot_richness(ps_protist_heter_clean, x="Water_mass", color="Water_mass", measures = c("Observed","Shannon"), title = "Protist Heterotrophics") + geom_boxplot(alpha= 0.8, outlier.size = 0.2, position=position_dodge(.9)) +
+        geom_point(size = 0.1) +
+          #scale_color_manual(values = Water_mass_colors) +
+        theme_bw() +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+dev.off()
+
+```
+
+
+```{r}
+## BPM Euphotic - SEASONAL ##
+
+#Remove samples with NA in 'Season'
+ps_protist_heter <- subset_samples(ps_protist_heter, !is.na(Season))
+#EEZ_euphotic_heter <- subset_samples(EEZ_euphotic_heter, !is.na(Area))
+ps_protist_heter <- subset_samples(ps_protist_heter, !is.na(photic_zone))
+
+#CairoPDF(file = "R.Figures/Richness/Protist.Diversity_Euphotic_SEASONAL", width = 10, height = 5) 
+   v <-  plot_richness( ps_protist_heter_clean, x="Water_mass", color="Season", measures = c("Observed","Shannon"), title = "Protist HET - SEASONAL") + geom_boxplot(alpha= 0.8, outlier.size = 0.2, position=position_dodge(.9)) +
+        geom_point(size = 0.1) +
+         # scale_color_manual(values = Season_colors) +
+        theme_bw() +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+#dev.off()
+
+v
+v$layers <- v$layers[-1]
+v
+v$layers <- v$layers[-2]
+v
+
+ggsave("Protist.Diversity_het_SEASONAL.pdf", dpi = 300,  width = 10, height = 5)
+
+```
+
+```{r}
+# Use euphotic or all (euphotic + aphotic)
+
+
+## BPM Euphotic - SEASONAL ##
+
+#CairoPDF(file = "R.Figures/Richness/Protist.Diversity_Euphotic_SEASONAL", width = 10, height = 5) 
+v <-  plot_richness( ps_protist_heter_clean, x="Water_mass", color="photic_zone", measures = c("Observed","Shannon"), title = "Protist HET -  Photic zone") + geom_boxplot(alpha= 0.8, outlier.size = 0.2, position=position_dodge(.9)) +
+        geom_point(size = 0.1) +
+         # scale_color_manual(values = Season_colors) +
+        theme_bw() +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+#dev.off()
+
+v
+v$layers <- v$layers[-1]
+v
+v$layers <- v$layers[-2]
+v
+
+ggsave("Protist.Diversity_het_photic_zone.pdf", dpi = 300,  width = 10, height = 5)
+
+```
+
+```{r}
+# Get the sample metadata
+meta <- sample_data(ps_protist_heter) %>% data.frame()
+
+# Check the unique values and counts in the depth zone column
+table(meta$photic_zone)
+#Aphotic Euphotic 
+#  119      547 
+
+v <- plot_richness( ps_protist_heter, x="photic_zone", color="photic_zone", measures = c("Observed","Shannon"), title = "Protist Heterotrophics") + geom_boxplot(alpha= 0.8, outlier.size = 0.2, position=position_dodge(.9)) +
+        geom_point(size = 0.1) +
+          #scale_color_manual(values = Water_mass_colors) +
+        theme_bw() +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+
+v
+v$layers <- v$layers[-1]
+v
+v$layers <- v$layers[-2]
+v
+
+ggsave("Protist.Diversity_HET_photic.pdf", dpi = 300,  width = 10, height = 5)
+ 
+```
+```{r}
+# Pull tax_table as dataframe
+tax_df <- as.data.frame(tax_table(ps_protist))
+
+# Get OTUs for each trophic mode
+auto_otus <- rownames(tax_df[tax_df$trophic_mode == "photosynthetic", ])
+hetero_otus <- rownames(tax_df[tax_df$trophic_mode == "heterotrophic", ])
+mixo_otus <- rownames(tax_df[tax_df$trophic_mode == "mixotrophic", ])
+
+# Subset the full phyloseq object
+ps_autotroph <- prune_taxa(auto_otus, ps_protist)
+ps_heterotroph <- prune_taxa(hetero_otus, ps_protist)
+ps_mixotroph <- prune_taxa(mixo_otus, ps_protist)
+
+# Alpha diversity for autotrophs
+alpha_auto <- estimate_richness(ps_autotroph, measures = c("Shannon")) %>%
+  rownames_to_column("file_code") %>%
+  mutate(trophic_mode = "photosynthetic")
+
+# Alpha diversity for heterotrophs
+alpha_hetero <- estimate_richness(ps_heterotroph, measures = c("Shannon")) %>%
+  rownames_to_column("file_code") %>%
+  mutate(trophic_mode = "heterotrophic")
+
+# Alpha diversity for mixotrophs
+alpha_mixo <- estimate_richness(ps_mixotroph, measures = c("Shannon")) %>%
+  rownames_to_column("file_code") %>%
+  mutate(trophic_mode = "mixotrophic")
+
+# Combine
+alpha_combined <- bind_rows(alpha_auto, alpha_hetero,alpha_mixo)
+
+
+meta_df <- data.frame(sample_data(ps_protist)) %>%
+  rownames_to_column("file_code") %>%
+  select(file_code, Water_mass, photic_zone)
+
+# Join metadata
+alpha_final <- left_join(alpha_combined, meta_df, by = "file_code")
+
+
+ggplot(alpha_final %>% filter(photic_zone == "Euphotic"),
+       aes(x = Water_mass, y = Shannon, color = trophic_mode)) +
+  geom_boxplot(alpha = 0.75) +
+  stat_summary(fun = mean, geom = "point", shape = 21, color = "black", size = 2,
+               position = position_dodge(width = 0.75)) +
+  labs(title = "Shannon Diversity (Euphotic Only)",
+       x = "Water Mass", y = "Shannon Index", fill = "Trophic Mode") +geom_boxplot(alpha= 0.8, outlier.size = 0.5)+
+  scale_fill_manual(values = c("photosynthetic" = "#1b9e77", "heterotrophic" = "#d95f02","mixotrophic" = "#7570b3")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Save plot
+ggsave("Shannon_ALL_TrophicMode_WaterMass_eup.pdf", width = 12, height = 6, dpi = 300)
+
+
+
+ggplot(alpha_final,
+       aes(x = Water_mass, y = Shannon, color = trophic_mode)) +
+  geom_boxplot(alpha = 0.75) +
+  stat_summary(fun = mean, geom = "point", shape = 21, color = "black", size = 2,
+               position = position_dodge(width = 0.75)) +
+  labs(title = "Shannon Diversity (ALL DEPTHS)",
+       x = "Water Mass", y = "Shannon Index", fill = "Trophic Mode") +geom_boxplot(alpha= 0.8, outlier.size = 0.5)+
+  scale_fill_manual(values = c("photosynthetic" = "#1b9e77", "heterotrophic" = "#d95f02","mixotrophic" = "#7570b3")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+#Covariation
+```{r}
+# Reshape to wide format: one Shannon column per trophic mode
+alpha_final_wide <- alpha_final %>%
+  select(file_code, Shannon, trophic_mode) %>%
+  pivot_wider(names_from = trophic_mode, values_from = Shannon,
+              names_prefix = "Shannon_")
+
+
+#Heterotrophic vsPhotosynthetic
+cor.test(alpha_final_wide$Shannon_heterotrophic, alpha_final_wide$Shannon_photosynthetic, method = "pearson")
+
+#Pearson's product-moment correlation
+
+#data:  alpha_final_wide$Shannon_heterotrophic and alpha_final_wide$Shannon_photosynthetic
+#t = 19.877, df = 669, p-value < 2.2e-16
+#alternative hypothesis: true correlation is not equal to 0
+#95 percent confidence interval:
+# 0.5594581 0.6548314
+#sample estimates:
+#      cor 
+#0.6093441 
+
+#Heterotrophic vs Mixotrophic
+cor.test(alpha_final_wide$Shannon_heterotrophic, alpha_final_wide$Shannon_mixotrophic, method = "pearson")
+
+#	Pearson's product-moment correlation
+#data:  alpha_final_wide$Shannon_heterotrophic and alpha_final_wide$Shannon_mixotrophic
+#t = 26.207, df = 669, p-value < 2.2e-16
+#alternative hypothesis: true correlation is not equal to 0
+#95 percent confidence interval:
+# 0.6722677 0.7471781
+#sample estimates:
+#      cor 
+#0.7117406 
+
+#Photosynthetic vs mixotrophic
+cor.test(alpha_final_wide$Shannon_photosynthetic, alpha_final_wide$Shannon_mixotrophic, method = "pearson")
+
+#	Pearson's product-moment correlation
+#data:  alpha_final_wide$Shannon_photosynthetic and alpha_final_wide$Shannon_mixotrophic
+#t = 26.228, df = 669, p-value < 2.2e-16
+#alternative hypothesis: true correlation is not equal to 0
+#95 percent confidence interval:
+# 0.6725743 0.7474252
+#sample estimates:
+#      cor 
+#0.7120166
+
+# Subset only Shannon columns
+shannon_df <- alpha_final_wide[, c("Shannon_heterotrophic", "Shannon_mixotrophic", "Shannon_photosynthetic")]
+
+# Compute correlation matrix
+cor_matrix <- cor(shannon_df, method = "pearson", use = "complete.obs")
+
+# Rename row and column names for clarity in the plot
+colnames(cor_matrix) <- c("Heterotrophic", "Mixotrophic", "Photosynthetic")
+rownames(cor_matrix) <- c("Heterotrophic", "Mixotrophic", "Photosynthetic")
+
+# Plot
+# Save the correlation plot as a PNG file
+png("Pairwise.png", width = 12, height = 7, units = "in", res = 300, bg = "white")
+corrplot(cor_matrix, method = "circle", type = "upper",
+         tl.col = "black", addCoef.col = "black", 
+         number.cex = 0.8, 
+         col = colorRampPalette(c("blue", "white", "red"))(200))
+dev.off()
+
+
+# Only required columns
+shannon_df <- alpha_final_wide[, c("Shannon_heterotrophic", "Shannon_mixotrophic", "Shannon_photosynthetic")]
+
+
+# Plot pairwise scatterplots
+ggpairs(shannon_df, 
+        lower = list(continuous = wrap("smooth", method = "lm", se = FALSE, color = "steelblue")),
+        upper = list(continuous = wrap("cor", size = 4)),
+        diag = list(continuous = wrap("densityDiag", alpha = 0.5)))
+
+```
+
+
+
+#############################  continuous data to discrete ###################################
+“How does heterotrophic protist diversity in the euphotic zone change as we move from south to north (latitude), and is this change related to chlorophyll levels?”
+
+```{r}
+
+#I will extracting the sample data from the phyloseq object, create the Ranking columns and then import the new coluns in the phyloseq object 
+Euphotic_ranks <- sample_data(EEZ_euphotic_heter) %>%
+  data.frame() %>%
+  mutate(
+    RankLat1 = cut(Lat, breaks = c(-80, -75, -70, -65, -60, -55, -50, -45, -40, -35, -30),
+                   labels = c("-80","-70", "-65", "-60", "-55", "-50", "-45", "-40", "-35", "-30"),
+                   include.lowest = TRUE),
+    RankLat2 = ntile(Lat, 20),
+    RankChla = ntile(Chla_total, 4)) %>%
+  select(Samples, RankLat1, RankLat2,RankChla) %>%
+  distinct(Samples, .keep_all = TRUE)
+
+#Adding the new columns in the metadata
+meta_orig <- sample_data(EEZ_euphotic_heter) %>% data.frame()
+
+Euphotic_ranks$RankChla=as.factor(Euphotic_ranks$RankChla)
+Euphotic_ranks$RankLat1=as.factor(Euphotic_ranks$RankLat1)
+Euphotic_ranks$RankLat2=as.factor(Euphotic_ranks$RankLat2)
+
+meta_merged <- left_join(meta_orig, Euphotic_ranks, by = "Samples")
+rownames(meta_merged) <- meta_merged$Samples 
+
+sample_data(EEZ_euphotic_heter) <- sample_data(meta_merged)
+
+
+
+# Check value ranges for each chlorophyll rank
+sample_data(EEZ_euphotic_heter) %>%
+  data.frame() %>%
+  group_by(RankChla) %>%
+  summarise(
+    Min_Chla = min(Chla_total, na.rm = TRUE),
+    Max_Chla = max(Chla_total, na.rm = TRUE),
+    Mean_Chla = mean(Chla_total, na.rm = TRUE),
+    n_samples = n()
+  )
+
+
+
+# Extract sample data as dataframe
+meta_df <- sample_data(EEZ_euphotic_heter) %>%
+  data.frame()
+
+# Add sample names as a column
+meta_df$Samples <- rownames(meta_df)
+
+# Reorder if you want Samples first (optional)
+meta_df <- meta_df %>%
+  select(Samples, everything())
+
+# Write to Excel
+write.xlsx(meta_df, file = "EEZ_euphotic_heter_metadata.xlsx", rowNames = FALSE)
+# convert integer to factor and levels
+#Euphotic_rankss$RankChla=as.factor(Euphotic_rankss$RankChla)
+#Euphotic_rankss$RankNO3=as.factor(Euphotic_rankss$RankNO3) 
+#Euphotic_rankss$RankDRSi=as.factor(Euphotic_rankss$RankDRSi) 
+
+
+```
+
+How protist heterotroph diversity in the euphotic zone changes along latitude and potentially relates to chlorophyll concentration?
+```{r}
+#CairoPDF(file = "R.Figures/Richness/Protist.Diversity_EUPHOTIC_Latitude1_Area2_March2022", width = 10, height = 5) 
+
+EEZ_euphotic_heter <- subset_samples(EEZ_euphotic_heter, !is.na(RankLat1))
+EEZ_euphotic_heter <- subset_samples(EEZ_euphotic_heter, !is.na(RankChla))
+
+# Extract original metadata
+meta_orig <- sample_data(ps_protist_heter) %>% data.frame()
+
+# Merge by 'Samples'
+meta_merged <- left_join(meta_orig, Euphotic_ranks, by = "Samples")
+
+# Set row names back for phyloseq compatibility
+rownames(meta_merged) <- meta_merged$Samples
+
+# Add back to phyloseq object
+sample_data(ps_protist_heter) <- sample_data(meta_merged)
+
+# If 'DepthLayer' or 'Zone' column marks euphotic samples
+ps_euphotic_heter <- subset_samples(ps_protist_heter, photic_zone == "Euphotic")
+
+
+# Estimate richness measures
+richness_df <- estimate_richness(ps_euphotic_heter, measures = c("Observed", "Shannon"))
+
+# Add Sample names as a column
+richness_df$Samples <- rownames(richness_df)
+
+# dont know why the '-' in the rownames are changed into '.' 
+richness_df$Samples <- chartr(".", "-", richness_df$Samples) # changed the naming back so it can be joined with sample_ID from medadata
+rownames(richness_df) <- richness_df$Samples 
+
+# Extract sample data
+meta_df <- sample_data(ps_euphotic_heter) %>% data.frame()
+
+# Merge
+richness_df <- richness_df %>%
+  left_join(meta_df, by = "Samples")
+
+# Find the row with the highest Shannon diversity
+richness_df[which.max(richness_df$Shannon), ]
+
+
+  t <- plot_richness(EEZ_euphotic_heter, x="RankLat1", color="RankChla", measures = c("Observed","Shannon"), title = "Protist Heter - Euphotic - Latitude") + geom_boxplot(alpha= 0.8, outlier.size = 0.2) +
+               # scale_color_manual(values = Area_colors) +
+        geom_point(size = 0.1) +
+        theme_bw() +
+        #scale_x_continuous(limits = c(0, 10)) +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+t
+
+# Save plot
+ggsave("Euph_lat_chlor.pdf", width = 12, height = 6, dpi = 300)
+
+#With lat on x and water mass at y
+  t <- plot_richness(EEZ_euphotic_heter, x="RankLat1", color="Water_mass", measures = c("Observed","Shannon"), title = "Protist Heter - Euphotic - Latitude") + geom_boxplot(alpha= 0.8, outlier.size = 0.2) +
+               # scale_color_manual(values = Area_colors) +
+        geom_point(size = 0.1) +
+        theme_bw() +
+        #scale_x_continuous(limits = c(0, 10)) +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+t
+
+# Save plot
+ggsave("Euph_lat_water.pdf", width = 12, height = 6, dpi = 300)
+
+
+
+#--------------------------------------------------------------------------------------------
+#I suggest using rank latitudes or discrete water masses in the X axis and rank chla concentrations within each of this.         
+richness_df$Lat_Chla_Group <- paste(richness_df$RankLat1, richness_df$RankChla, sep = "_")
+
+sample_data(EEZ_euphotic_heter)$Lat_Chla_Group <- with(sample_data(EEZ_euphotic_heter), paste(RankLat1, RankChla, sep = "_"))
+
+#Compute ranges per rank
+meta_df <- sample_data(EEZ_euphotic_heter) %>% data.frame()
+
+# If Chla_total is a character, convert safely to numeric:
+meta_df$Chla_total <- as.numeric(as.character(meta_df$Chla_total))
+
+# Compute Chl a ranges
+rank_labels <- meta_df %>%
+  group_by(RankChla) %>%
+  summarise(
+    MinChla = round(min(Chla_total, na.rm = TRUE), 2),
+    MaxChla = round(max(Chla_total, na.rm = TRUE), 2)
+  ) %>%
+  mutate(
+    RankChla_label = paste0("Rank ", RankChla, ": ", MinChla, "–", MaxChla, " µg/L")
+  )
+ 
+#Map the new labels to your metadata
+# Create a named vector to relabel
+rank_label_map <- setNames(rank_labels$RankChla_label, rank_labels$RankChla)
+
+# Relabel directly in metadata
+meta_df$RankChlaLabel <- rank_label_map[as.character(meta_df$RankChla)]
+
+# Add back to phyloseq
+sample_data(EEZ_euphotic_heter) <- sample_data(meta_df)
+
+t <- plot_richness(EEZ_euphotic_heter, x="Lat_Chla_Group", color="RankChlaLabel", measures = c("Observed","Shannon"), title = "Protist Heter - Euphotic - Latitude") + geom_boxplot(alpha= 0.8, outlier.size = 0.2) +
+               # scale_color_manual(values = Area_colors) +
+        geom_point(size = 0.1) +
+        theme_bw() +
+        #scale_x_continuous(limits = c(0, 10)) +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+t + labs(color = "Chlorophyll a Concentration \nRanks (µg/L ranges)") + labs(x = "Latitude Groups (°S) by Chlorophyll a Rank")
+
+ggsave("Euph_lat_wchla_nested.pdf", width = 12, height = 6, dpi = 300)
+
+
+
+
+```
+### Richness vs metadata relationships
+```{r, fig.height=4, fig.width=8}
+
+richness <- estimate_richness(ps_protist_heter,  measures = NULL)
+setDT(richness,keep.rownames = "Samples")
+# dont know why the '-' in the rownames are changed into '.' 
+
+richness$Samples <- chartr(".", "-", richness$Samples) # changed the naming back so it can be joined with sample_ID from medadata
+
+metadata <- read_excel("C:/Anna_Maria_IEO/thesis/tables/phyloseq_export_ps_AMmetadata.xlsx")
+
+metadata_richness <- left_join(metadata, richness, by = "Samples" )
+
+
+# All samples 
+
+all_metadata_richness <- metadata_richness %>%
+  select("Area", "Lat","Temp", "Sal", "Chla_total", "DRSi", "NO3", "DRP":Fisher)
+
+#write.xlsx(all_metadata_richness, file = "PrismFigures/all_metadata_richness.xlsx")
+
+# Euphotic samples
+
+euphotic_metadata_richness <- metadata_richness %>%
+  filter(photic_zone == "Euphotic") %>%
+    select("Area", "Lat","Temp", "Sal", "Chla_total", "DRSi", "NO3", "DRP":Fisher)
+
+#write.xlsx(euphotic_metadata_richness, file = "PrismFigures/euphotic_metadata_richness.xlsx")
+
+
+## Linear regressions - to be ran when completed metadata table
+  
+  ggplot(metadata_richness, aes(Temp, Observed)) +
+  geom_point() +
+  stat_smooth(method = lm)
+  
+  model <- lm(Observed ~ Temp, data = metadata_richness)
+
+  summary(model)
+  
+
+#Call:
+#lm(formula = Observed ~ Temp, data = metadata_richness)
+
+#Residuals:
+#    Min      1Q  Median      3Q     Max 
+#-185.31  -62.25  -19.93   38.06  486.47 
+
+#Coefficients:
+#            Estimate Std. Error t value Pr(>|t|)    
+#(Intercept) 106.3867     6.4151  16.584   <2e-16 ***
+#Temp          6.3774     0.6479   9.843   <2e-16 ***
+#---
+#Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#Residual standard error: 101.6 on 563 degrees of freedom
+#  (1517 observations deleted due to missingness)
+#Multiple R-squared:  0.1468,	Adjusted R-squared:  0.1453 
+#F-statistic: 96.89 on 1 and 563 DF,  p-value: < 2.2e-16
+```
