@@ -1,5 +1,5 @@
 #alpha diversity
-```{r}
+```{r cars}
 
 EEZ_euphotic_heter <-  ps_protist_heter %>%  subset_samples(photic_zone== "Euphotic")
 
@@ -11,9 +11,8 @@ STF_euphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Euphotic")
 
 SAW_euphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Euphotic") 
 
-
-
 ```
+
 # Creating lists for some specific cases - WATER MASSES - APHOTIC
 
 
