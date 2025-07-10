@@ -1,0 +1,1910 @@
+
+#Libraries
+```{r cars}
+library(stringr)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(readr)
+library("treemapify")
+library(treemap)
+library("Cairo")
+library("readxl")
+library("openxlsx")
+library("gplots")
+library(forcats)
+library(mgcv)
+library(phyloseq)
+library(vegan)
+library(magrittr)
+library(tibble)
+library(tidyverse)
+#data(GlobalPatterns)
+library(RColorBrewer)
+library(data.table)
+library(GGally)
+library(corrplot)
+library(ggplot2)
+library(cowplot)
+library(grid)
+library(Cairo)
+library(microbiome)
+library(microViz)
+
+```
+First, importing the clean phyloseq
+
+No. taxa = 104611
+No. samples = 2082
+No. variables = 34
+```{r}
+# Load cleaned phyloseq object
+ps_cleaned <- readRDS("C:/Anna_Maria_IEO/thesis/tables/Anna_Maria_cleaned_phyloseq.rds")
+
+# Remove samples from unwanted project
+ps_cleaned <- subset_samples(ps_cleaned, Project != "BiophysMoorings")
+
+# Remove problematic samples from PO2022 based on previously identified sample differences
+samples_po_only <- setdiff(sample_names(PO.mod), sample_names(t1))
+ps_cleaned <- subset_samples(ps_cleaned, !(sample_names(ps_cleaned) %in% samples_po_only))
+
+# Drop OTUs not present after filtering samples
+ps_cleaned <- prune_taxa(taxa_sums(ps_cleaned) > 0, ps_cleaned)
+
+# Remove OTUs that only exist in PO.mod but not in t1 (taxonomy fix)
+otus_po_only <- setdiff(taxa_names(PO.mod), taxa_names(t1))
+ps_cleaned <- prune_taxa(!(taxa_names(ps_cleaned) %in% otus_po_only), ps_cleaned)
+
+ps_cleaned
+```
+
+Filtration based on Taxonomy - for PROTISTS
+Filtration: removing Biostat,TAN1708 and SEA0201 cruises and keeping only Seawater samples.
+
+ps_protist_heter
+phyloseq-class experiment-level object
+otu_table()   OTU Table:         [ 13272 taxa and 671 samples ]
+sample_data() Sample Data:       [ 671 samples by 40 sample variables ]
+tax_table()   Taxonomy Table:    [ 13272 taxa by 12 taxonomic ranks ]
+```{r pressure, echo=FALSE}
+  # Keep only protist taxa, remove Metazoa and Fungi, unwanted cruises, and non-seawater samples(I am removing TAN1604 as I only had 6 samples in the NIWA excel)
+ps_protist <- ps_cleaned %>%
+  subset_taxa(!(Division %in% c("Metazoa", "Fungi"))) %>%
+  subset_samples(!(Cruise.TAN %in% c("Biostat", "TAN1708","TAN1604", "SEA0201"))) %>%
+  subset_samples(Sample_Type == "SW") %>%
+  subset_samples(!(Sampling_Type %in% c("underway", "Underway", "Incubation"))) %>%
+  subset_taxa(!is.na(trophic_mode))  # Keep only taxa with known trophic mode
+
+
+unique(as.vector(tax_table(ps_protist)[, "trophic_mode"])) #Checking if the it contains all the types of protists
+unique(get_variable(ps_protist, "Sample_Type"))            #Checking that we only have SW
+unique(get_variable(ps_protist, "Sampling_Type"))          #Checking that we don´t have underway
+unique(get_variable(ps_protist, "Water_mass"))             #Checking the water masses
+unique(get_variable(ps_protist, "Cruise.TAN"))             #Checking the Cruises
+
+# Keep only heterotrophic and mixotrophic protists
+ps_protist_heter <- subset_taxa(ps_protist, trophic_mode %in% c("heterotrophic", "mixotrophic"))
+
+ps_protist_heter
+
+# Remove Syndiniales from heterotrophs (they are often parasitic and hard to interpret)
+ps_protist_Synd <- subset_taxa(ps_protist_heter, !(trophic_mode_2 %in% c("Syndiniales")))
+
+# Keep only photosynthetic and mixotrophic protists
+ps_protist_autot <- subset_taxa(ps_protist, trophic_mode %in% c("photosynthetic", "mixotrophic"))
+
+ 
+unique(as.vector(tax_table(ps_protist_heter)[, "trophic_mode"])) #Checking if only have heterotrophs
+unique(get_variable(ps_protist_heter, "Cruise.TAN"))             #Checking the Cruises
+unique(get_variable(ps_protist_heter, "Sample_Type"))            #Checking that we only have SW
+unique(get_variable(ps_protist_heter, "Sampling_Type"))          #Checking that we don´t have underway
+unique(get_variable(ps_protist_heter, "Water_mass"))             #Checking the water masses
+unique(get_variable(ps_protist_heter, "Project"))
+unique(as.vector(tax_table(ps_protist_autot)[, "trophic_mode"])) #Checking if the it contains only autotrophs
+
+tax_autottest <- as.data.frame(tax_table(ps_protist_autot))
+```
+
+This is Andres code from: https://github.com/agutierrez2001/Catalyst_Biogeography/blob/main/NZ_MetaB_Paper_ALLPROTIST.Rmd
+
+ONLY HETEROTROPHS
+# # First - 
+# ## Standardize abundances to the median sequencing depth
+Goal: Normalize counts so that all samples are scaled to the same sequencing depth — the median.
+(sample_sums(ps) gets total reads per sample, transform_sample_counts() applies your custom normalization function to each sample and round() is used to keep counts as integers (optional but common)).
+```{r}
+#HETEROTROPHS PROTISTS 
+# Normalize OTU counts to the median sequencing depth across samples
+ps_protist_heter_median <- median(sample_sums(ps_protist_heter))
+normalize_protist_heter_median <- function(x, t = ps_protist_heter_median) round(t * (x / sum(x)))
+
+# Apply normalization
+ps_protist_heter_std <- transform_sample_counts(ps_protist_heter, normalize_protist_heter_median)
+
+unique(as.vector(tax_table(ps_protist_heter_std)[, "trophic_mode"]))
+
+```
+
+### CLASS LEVEL STACK BAR ANALYSIS - SAMPLE WISE
+## ANALYSIS OF RELATIVE ABUNDANCES - %
+##Calculate statistics of group specific relative abundances 
+
+```{r pressure, echo=FALSE}
+
+# Keep only samples from the euphotic zone (photic surface layer)
+ps_protist_euphotic_heter <- subset_samples(ps_protist_heter_std, photic_zone == "Euphotic")
+
+#####################################################################
+# Replace NA values in the OTU table with 0 to avoid downstream errors
+otu_table(ps_protist_euphotic_heter)[is.na(otu_table(ps_protist_euphotic_heter))] <- 0
+
+anyNA(otu_table(ps_protist_euphotic_heter))  # should return FALSE
+
+####################################################################
+
+# Aggregate data to Class level (merge OTUs belonging to the same Class)
+# CLASS
+#tax_glom() merges taxa (ASVs/OTUs) at a higher taxonomic level — here, you're grouping by "Class". If multiple ASVs belong to the same Class, they get summed into one row. The new phyloseq object now has fewer taxa, each representing a Class, not individual ASVs.
+#Replace all Nas with 0 in phyloseq
+ 
+ps_protist_heter_class <- tax_glom(ps_protist_euphotic_heter, taxrank = "Class")
+
+plot(sort(taxa_sums(ps_protist_heter_class), TRUE) )
+get_taxa_unique(ps_protist_heter_class, "Class")
+
+
+#Checking how many samples I have per water sample
+table(sample_data(ps_protist_euphotic_heter)$Water_mass)
+
+#Antarctic       SAW       STF       STW 
+#      231       111        35       170 
+
+```
+## Third - Standardize to relative abundances 
+```{r pressure, echo=FALSE}
+# Transform to relative abundance for percentage-based interpretation
+ps_protist_heter_class.rel <- transform_sample_counts(ps_protist_heter_class, function(OTU) OTU * 100 / sum(OTU))
+
+# Replace any NaNs with 0
+#During normalization, we did: 
+#ps_rel <-transform_sample_counts(ps_protist_heter_class, function(OTU) OTU*100/sum(OTU))
+#That works only if sum(OTU) > 0 — otherwise, it returns NaN when dividing by 0.
+#So if any samples were completely zero (no reads), then those taxa end up with NaN values.
+ 
+otu <- otu_table(ps_protist_heter_class.rel)
+otu[is.nan(otu)] <- 0 #Finds all NaN values in the OTU table and replaces them with 0, so they no longer cause                              errors or strange behavior in downstream analysis.
+otu_table(ps_protist_heter_class.rel) <- otu #updating phyloseq with the fixed values.
+
+```
+## Select main classes of interest  -  most abundant classes
+```{r pressure, echo=FALSE}
+# Sum total relative abundance for each Class and select top 12 most abundant
+protist.heter.class.sum <- tapply(taxa_sums(ps_protist_heter_class.rel), 
+                                  tax_table(ps_protist_heter_class.rel)[, "Class"], sum, na.rm = TRUE)
+
+#Sorts the classes from most to least abundant.Picks out the top 12 most abundant Class names.
+
+top12classheter <- names(sort(protist.heter.class.sum, TRUE))[1:12]
+
+# Replace classes not in the top 12 with "Other"
+#prune_taxa() keeps only the taxa (i.e., Classes) that are in your top 12 list. This filters the phyloseq object to just those top 12 Classes — nice and tidy!
+  
+# Extract tax_table as a data.frame
+tax_df <- as.data.frame(tax_table(ps_protist_heter_class.rel))
+
+# Replace classes that are not in the top 12 with "Other"
+tax_df$Class <- ifelse(tax_df$Class %in% top12classheter, tax_df$Class, "Other")
+
+# Set it back into the phyloseq object
+tax_table(ps_protist_heter_class.rel) <- tax_table(as.matrix(tax_df))
+
+# Final phyloseq object for top 12 classes
+ps_protist_heter_class.top12.abund <- ps_protist_heter_class.rel
+
+ps_protist_heter_class.top12.abund = ps_protist_heter_class.rel
+
+ps_protist_heter_class.top12.abund
+  
+  #sort(protist.heter.class.sum, TRUE)[1:15]
+
+```
+
+# Colors for plotting taxonomy
+
+```{r pressure, echo=FALSE}
+
+# Load color scheme from Excel and prepare named vectors for plotting
+classes_division <- read_excel("C:/Anna_Maria_IEO/thesis/tables/Color_division.xlsx")
+
+classes_division$color_hex_class <- col2hex(classes_division$color_class)
+class_color_class <- structure(as.character(classes_division$color_hex_class),
+                               .Names = as.character(classes_division$class))
+class_color_class["Other"] <- "#BDBDBD"  # grey for 'Other'
+
+
+```
+
+## Make LONG FORMAT dataframe for plotting
+# PROTIST - SYND
+```{r pressure, echo=FALSE}
+
+# Reshape OTU table into long format for ggplot2
+otu_dfheter <- as.data.frame(otu_table(ps_protist_heter_class.top12.abund)) %>%
+  rownames_to_column(var = "file_code") %>%
+  pivot_longer(cols = -file_code, names_to = "OTUNumber", values_to = "n_reads") %>%
+  filter(!is.na(n_reads))
+
+# Join taxonomic and metadata information
+taxo_dfheter <- as.data.frame(tax_table(ps_protist_heter_class.top12.abund)) %>%
+  rownames_to_column("OTUNumber")
+otu_dfheter <- left_join(taxo_dfheter, otu_dfheter)
+
+metadata_dfheter <- data.frame(sample_data(ps_protist_heter_class.top12.abund)) %>%
+  rownames_to_column("file_code")
+otu_dfheter <- left_join(otu_dfheter, metadata_dfheter, by = "file_code")
+
+# Merge color assignments
+class_df_Top12_protist_heter <- left_join(otu_dfheter, classes_division, by = c("Class" = "class"))
+
+# Remove under-sampled cruises. After removing the PO2022 samples , I notice that I have some samples from some cruises that are just a few.
+class_df_Top12_protist_heter <- class_df_Top12_protist_heter %>%
+  filter(!(Cruise.TAN %in% c("TAN0902", "TAN0909", "TAN1006", "TAN1103", "TAN1113", "TAN1204", "TAN1604")))
+      
+```
+
+Relative abundances
+```{r pressure, echo=FALSE}
+
+# Loop through each water mass and generate relative abundance barplots and treemaps
+water_masses <- unique(class_df_Top12_protist_heter$Water_mass)
+
+for (wm in water_masses) {
+  
+  df_watermass <- class_df_Top12_protist_heter %>% filter(Water_mass == wm)
+
+  class_stats <- df_watermass %>%
+    group_by(Class) %>%
+    add_tally() %>%
+    summarise(
+      median = median(n_reads),
+      mean = mean(n_reads),
+      sd = sd(n_reads),
+      n = mean(n)
+    ) %>%
+    arrange(-mean)
+
+  class_stats_col <- left_join(class_stats, classes_division, by = c("Class" = "class"))
+  color_class <- setNames(class_stats_col$color_hex_class, class_stats_col$Class)
+  color_class["Other"] <- "#BDBDBD"
+  class_stats_col$Class <- reorder(class_stats_col$Class, -class_stats_col$mean)
+
+  # Barplot PDF
+  filename <- paste0("Protist_heterrophs_", wm, "_REL_STATS_BARPLOT.pdf")
+  CairoPDF(file = filename, width = 8, height = 6)
+  print(
+    ggplot(class_stats_col, aes(x = Class, y = mean, fill = Class)) +
+      geom_bar(stat = "identity", width = 0.9) +
+      scale_fill_manual(values = color_class) +
+      ggtitle(paste("Protist - Euphotic - MEAN -", wm)) +
+      xlab("") +
+      ylab("% Relative abundance") +
+      geom_errorbar(aes(ymin = mean, ymax = mean + sd), width = 0.1, size = 0.1) +
+      theme_bw() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 6))
+  )
+  dev.off()
+
+  # Treemap PDF
+  treemap_data <- class_stats_col %>%
+    mutate(label = paste0(Class, "\n", round(mean, 1), "%"))
+
+  treemap_filename <- paste0("Protist_heterrophs_", wm, "_REL_STATS_TREEMAP.pdf")
+  CairoPDF(file = treemap_filename, width = 8, height = 6)
+  treemap(
+    treemap_data,
+    index = "label",
+    vSize = "mean",
+    vColor = "Class",
+    type = "categorical",
+    palette = color_class,
+    title = paste("Protist - Euphotic - Treemap -", wm),
+    fontsize.labels = 8,
+    border.col = "white"
+  )
+  dev.off()
+}
+
+```
+
+I want to extract the legend for the text
+```{r}
+
+# Prepare dummy data to include all classes
+all_classes <- unique(class_df_Top12_protist_heter$Class)
+legend_df <- data.frame(
+  Sample = "Dummy",
+  Abundance = 1,
+  Class = all_classes
+)
+
+# Color map (make sure it's complete)
+color_class <- setNames(classes_division$color_hex_class, classes_division$class)
+color_class["Other"] <- "#BDBDBD"
+
+# Dummy plot for legend
+legend_plot <- ggplot(legend_df, aes(x = Sample, y = Abundance, fill = Class)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = color_class) +
+  theme_void() +
+  guides(fill = guide_legend(ncol = 1)) +  # Single column
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 10),
+    legend.key.height = unit(1.2, "cm")  # Increase vertical space here
+  )
+
+# Extract legend only
+legend_only <- cowplot::get_legend(legend_plot)
+
+# Save as PNG with transparent background
+CairoPNG("Legend_only_protist_classes_wide_spacing.png", width = 400, height = 1000)  # Increase height as needed
+grid.newpage()
+grid.draw(legend_only)
+dev.off()
+
+
+```
+### SO FOR NOW I NEED TO PLOT WATER MASSES INDEPENDENTLY - One water mass at a time
+Heterotrophics
+## SUM of reads - It rseults in the same ranking as using the mean but with different absolute numbers
+
+### MOST ABUNDANT SPECIES 
+This is Andres code from: https://github.com/agutierrez2001/Catalyst_Biogeography/blob/main/NZ_MetaB_Paper_ALLPROTIST.Rmd
+# PROTIST - HETEROTROPHS
+# Select MOST ABUNDANT SPECIES AND PRUNE FOR NEW PS OBJECT THAT CAN BE TRANSFORMED
+
+```{r pressure, echo=FALSE}
+ps_protist_euphotic_heter <- subset_samples(ps_protist_heter_std, photic_zone == "Euphotic")
+
+# CLASS - I was getting an error "Error in merge_taxa.indices.internal(x, eqtaxa, archetype) : invalid archetype provided" since I had some Nas in the otu table. I am removing them in order to work.
+#####################################################################
+  otu_table(ps_protist_euphotic_heter)[is.na(otu_table(ps_protist_euphotic_heter))] <- 0
+  anyNA(otu_table(ps_protist_euphotic_heter))  # should return FALSE
+####################################################################
+  #NArm = F to avoid discarding ASVs without a genus annotation - if not, your relative abundances will not be correct.
+# Second - agglomerate the sequencing depth normalized OTU table 
+# CLASS
+#tax_glom() merges taxa (ASVs/OTUs) at a higher taxonomic level — here, you're grouping by "Class". If multiple ASVs belong to the same Class, they get summed into one row. The new phyloseq object now has fewer taxa, each representing a Class, not individual ASVs.  
+ps_protist_species_het <- tax_glom(ps_protist_euphotic_heter, taxrank = "Species",NArm = FALSE)
+
+plot(sort(taxa_sums(ps_protist_species_het), TRUE) )
+get_taxa_unique(ps_protist_species_het, "Species")
+
+```
+## Third - Standardize to relative abundances 
+```{r pressure, echo=FALSE}
+
+ps_protist_species_het.rel = transform_sample_counts(ps_protist_species_het, function(OTU) OTU*100/sum(OTU))
+
+```
+### select Top 100 PROTIST-SYND classes of interest based on abundance
+```{r}
+#During normalization, we did: 
+#ps_rel <-transform_sample_counts(ps_protist_species, function(OTU) OTU*100/sum(OTU))
+#That works only if sum(OTU) > 0 — otherwise, it returns NaN when dividing by 0.
+#So if any samples were completely zero (no reads), then those taxa end up with NaN values.
+ 
+
+otu <- otu_table(ps_protist_species_het.rel)
+otu[is.nan(otu)] <- 0 #Finds all NaN values in the OTU table and replaces them with 0, so they no longer cause                            errors or strange behavior in downstream analysis.
+otu_table(ps_protist_species_het.rel) <- otu #updating k,in phyloseq with the fixed values.
+
+
+
+    ### most abundant classes
+ species.sum_protist = tapply(taxa_sums(ps_protist_species_het.rel), tax_table(ps_protist_species_het.rel)[, "Species"], mean, na.rm=TRUE)
+  top100species_protist = names(sort(species.sum_protist, TRUE))[1:100]
+  Top100species_protist = prune_taxa((tax_table(ps_protist_species_het.rel)[, "Species"] %in% top100species_protist), ps_protist_species_het.rel)
+  Top100species_protist
+  
+Species_names_protist = data.frame(Species_reads = sort(taxa_sums(Top100species_protist), TRUE), sorted = 1:ntaxa(Top100species_protist), Species = tax_table(Top100species_protist)[, "Species" ])
+
+#write.xlsx(Species_names_protist , file = "Tables/Species_abundance_protist_ALL_MEAN_top100_March2022.xlsx")
+
+```
+# Dataframe and wide to long transformation of phyloseq object - 
+```{r pressure, echo=FALSE}
+
+otu_df_protist_heter <- as.data.frame(Top100species_protist@otu_table@.Data, stringsAsFactors = FALSE) %>%
+  rownames_to_column(var = "file_code") %>%  # rownames are sample IDs now
+  pivot_longer(
+    cols = -file_code,
+    names_to = "OTUNumber",
+    values_to = "n_reads",
+    values_drop_na = TRUE
+  ) %>%
+  filter(n_reads != 0, !is.na(n_reads))
+
+  # See https://github.com/joey711/phyloseq/issues/983
+    taxo_df_protist <- as.data.frame(Top100species_protist@tax_table@.Data, stringsAsFactors = FALSE) %>%
+      rownames_to_column(var = "OTUNumber")
+
+    otu_df_protist_heter <- left_join(taxo_df_protist, otu_df_protist_heter)
+
+    metadata_df <- data.frame(sample_data(Top100species_protist)) %>%
+      rownames_to_column(var = "file_code")
+
+    otu_df_protist_heter <- left_join(otu_df_protist_heter, metadata_df, by = c("file_code"))
+     
+    unique(get_variable(otu_df_protist_heter, "Class"))
+    
+    OTU_abund_top100_protist_eu  <-left_join(otu_df_protist_heter, classes_division, by=c("Class"= "class"))
+    
+    unique(get_variable(OTU_abund_top100_protist_eu, "Class"))
+
+```
+
+
+### Select most abundant OTUs per WATER MASSES using dplyr - EUPHOTIC
+
+## TOP 100 species ps object - OPTION A for meaningful average abundance values
+
+```{r, fig.height=8, fig.width=8}
+OTU_abund_top100_protist_eu  <-   OTU_abund_top100_protist_eu  %>%
+  group_by(OTUNumber, Water_mass) %>%
+  add_tally(name = "n") %>%
+  mutate(mean_OTU = mean(n_reads, na.rm=TRUE), median_OTU = median(n_reads, na.rm=TRUE), Total_OTU = sum(n_reads, na.rm = TRUE), n_samples = mean(n)) %>%
+  select(OTUNumber:Water_mass, Sample_Type, Supergroup:Total_OTU) %>%
+  arrange(Water_mass, -Total_OTU) %>%
+  unite(OTU_water, OTUNumber, Water_mass, remove = FALSE) %>% # to allow selecting for distinct OTUs
+  unite(OTU_genus, OTUNumber, Genus, remove = FALSE) %>%
+  unite(OTU_species, OTUNumber, Species, remove = FALSE)
+
+
+## Select most abundant OTUs for plotting SUM TOTAL read abundance values
+OTU_abund_top100_protist_eu_SUM <- OTU_abund_top100_protist_eu %>%
+  distinct(OTU_water, .keep_all = TRUE) %>%
+  arrange(Water_mass, -Total_OTU) %>%
+   group_by(Water_mass) %>% 
+   top_n(20,Total_OTU)
+
+unique(get_variable(OTU_abund_top100_protist_eu_SUM, "Class"))
+```
+
+
+```{r}
+# color coding # Water mass - SUM or MEAN
+color_class1 <- as.character(OTU_abund_top100_protist_eu_SUM$color_hex_class)
+names(color_class1) <- as.character(OTU_abund_top100_protist_eu_SUM$Class)
+OTU_abund_top100_protist_eu_SUM$OTU_species = with(OTU_abund_top100_protist_eu_SUM, reorder(OTU_species, Total_OTU))
+
+# Loop over unique water masses
+for (wm in unique(OTU_abund_top100_protist_eu_SUM$Water_mass)) {
+  
+  Top_otu_order <- OTU_abund_top100_protist_eu_SUM %>%
+    filter(Water_mass == wm) %>%
+    mutate(name = fct_reorder(OTU_species, Total_OTU))
+  
+  g <- ggplot(Top_otu_order, aes(x = name, y = Total_OTU, fill = Class)) +
+    geom_bar(stat = "identity", width = 0.95) +
+    coord_flip() +
+    scale_fill_manual(values = color_class1) +
+    xlab("") +
+    theme_bw() +
+    theme(
+        aspect.ratio = 2/1,
+        axis.text.x = element_text(angle = 0, hjust = 1, size = 12),
+        axis.text.y = element_text(angle = 0, hjust = 1, size = 12),
+        legend.position = "none"  # Removes legend
+    ) +
+    ggtitle(paste("Protist - Heter - Euphotic -", wm, "- SUM")) +
+    ylab("Sum OTU - Sequencing depth standardized abundance")
+
+  # Save the plot
+  ggsave(filename = paste0("Protist_heter_euphotic_top20_", wm, "_SUM.pdf"),
+         plot = g, dpi = 300, width = 8, height = 16, scale = 1.2)
+}
+```
+
+
+NOW EACH CRUISE SEPERATELY
+```{r}
+
+# color coding # Water mass - MEAN
+color_class_heter <- as.character(class_df_Top12_protist_heter$color_hex_class)
+names(color_class_heter) <- as.character(class_df_Top12_protist_heter$Class)
+class_df_Top12_protist_heter$OTU_species = with(class_df_Top12_protist_heter, reorder(Class, n_reads))
+
+# Step 1: Filter and prep the data
+selected_cruises <- c("TAN1802")
+class_df_selected <- class_df_Top12_protist_heter %>%
+  filter(Cruise.TAN %in% selected_cruises) %>%
+  mutate(
+    CTD_number = as.character(CTD_number),
+    Depth = as.character(Depth),
+    Sample_ID = factor(Sample_ID, levels = unique(Sample_ID))  # keep bar order consistent
+  )
+
+# Step 2: Prepare color palette
+color_class_selected <- color_class_heter[names(color_class_heter) %in% unique(class_df_selected$Class)]
+
+# Step 3: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+  distinct(Sample_ID, Depth) %>%
+  arrange(Sample_ID) %>%
+  deframe()  # named vector: names = Sample_ID, values = Depth
+
+# Step 4: Plot
+g <- ggplot(data = class_df_selected, aes(x = Sample_ID, y = n_reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  scale_fill_manual(values = color_class_selected) +
+  scale_x_discrete(labels = depth_labels) +  # show Depth instead of Sample_ID
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(cols = vars(CTD_number), scales = "free_x", space = "free_x", switch = "x") +
+   labs(x = "CTD number by depth (m)") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 90, color = "black"),
+    axis.text.y = element_text(size = 12),
+    strip.placement = "outside",
+    strip.background.x = element_blank(),
+    strip.text = element_text(size = 12, color = "black", face = "bold"),
+    panel.spacing.x = unit(0, "pt"),
+    legend.position = "bottom"
+  ) +
+  ggtitle("Heterotrophic protists - 1802") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Step 5: Save
+ggsave("Top12_protistheter_selected_1802.png", plot = g, width = 12, height = 7, dpi = 300, bg = "white")
+
+##
+
+
+selected_cruises <- c("TAN1802")
+desired_day_order <- paste("Day", 1:17)
+
+class_df_selected <- class_df_Top12_protist_heter %>%
+  filter(Cruise.TAN %in% selected_cruises) %>%
+  mutate(
+    Day = gsub("\\s+", " ", trimws(Day)),  # Remove extra spaces
+    Day = factor(Day, levels = desired_day_order),
+    Depth = as.character(Depth)
+  ) %>%
+  arrange(Day, Sample_ID) %>%
+  mutate(
+    Sample_ID = factor(Sample_ID, levels = unique(Sample_ID))
+  )
+
+
+# Step 2: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+  distinct(Sample_ID, Depth) %>%
+  deframe()
+
+# Step 2: Prepare color palette
+color_class_selected <- color_class_heter[names(color_class_heter) %in% unique(class_df_selected$Class)]
+
+# Step 3: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+  distinct(Sample_ID, Depth) %>%
+  arrange(Sample_ID) %>%
+  deframe()  # named vector: names = Sample_ID, values = Depth
+
+# Step 4: Plot
+g <- ggplot(data = class_df_selected, aes(x = Sample_ID, y = n_reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  scale_fill_manual(values = color_class_selected) +
+  scale_x_discrete(labels = depth_labels) +  # show Depth instead of Sample_ID
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(cols = vars(Day), scales = "free_x", space = "free_x", switch = "x") +
+   labs(x = "Sampling day by depth (m)") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 90, color = "black"),
+    axis.text.y = element_text(size = 12),
+    strip.placement = "outside",
+    strip.background.x = element_blank(),
+    strip.text = element_text(size = 12, color = "black", face = "bold"),
+    panel.spacing.x = unit(0, "pt"),
+    legend.position = "bottom"
+  ) +
+  ggtitle("Heterotrophic protists - TAN1802") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Step 5: Save
+ggsave("Top12_protistheter_selectedSAMPDEPTH_TAN1802.png", plot = g, width = 12, height = 7, dpi = 300, bg = "white")
+#---------------------------------------------------------------------------------------------------------
+
+# Step 1: Filter and prep the data
+selected_cruises <- c("TAN1901")
+class_df_selected <- class_df_Top12_protist_heter %>%
+  filter(Cruise.TAN %in% selected_cruises) %>%
+  mutate(
+    CTD_number = as.character(CTD_number),
+    Depth = as.character(Depth),
+    Sample_ID = factor(Sample_ID, levels = unique(Sample_ID))  # keep bar order consistent
+  )
+
+# Step 2: Prepare color palette
+color_class_selected <- color_class_heter[names(color_class_heter) %in% unique(class_df_selected$Class)]
+
+# Step 3: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+  distinct(Sample_ID, Depth) %>%
+  arrange(Sample_ID) %>%
+  deframe()  # named vector: names = Sample_ID, values = Depth
+
+# Step 4: Plot
+g <- ggplot(data = class_df_selected, aes(x = Sample_ID, y = n_reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  scale_fill_manual(values = color_class_selected) +
+  scale_x_discrete(labels = depth_labels) +  # show Depth instead of Sample_ID
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(cols = vars(CTD_number), scales = "free_x", space = "free_x", switch = "x") +
+   labs(x = "CTD number by depth (m)") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 90, color = "black"),
+    axis.text.y = element_text(size = 12),
+    strip.placement = "outside",
+    strip.background.x = element_blank(),
+    strip.text = element_text(size = 12, color = "black", face = "bold"),
+    panel.spacing.x = unit(0, "pt"),
+    legend.position = "bottom"
+  ) +
+  ggtitle("Heterotrophic protists - 1901") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Step 5: Save
+ggsave("Top12_protistheter_selected_1901.png", plot = g, width = 12, height = 7, dpi = 300, bg = "white")
+
+##
+
+
+selected_cruises <- c("TAN1901")
+desired_day_order <- paste("Day", 1:31)
+
+class_df_selected <- class_df_Top12_protist_heter %>%
+  filter(Cruise.TAN %in% selected_cruises) %>%
+  mutate(
+    Day = gsub("\\s+", " ", trimws(Day)),  # Remove extra spaces
+    Day = factor(Day, levels = desired_day_order),
+    Depth = as.character(Depth)
+  ) %>%
+  arrange(Day, Sample_ID) %>%
+  mutate(
+    Sample_ID = factor(Sample_ID, levels = unique(Sample_ID))
+  )
+
+
+# Step 2: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+  distinct(Sample_ID, Depth) %>%
+  deframe()
+
+# Step 2: Prepare color palette
+color_class_selected <- color_class_heter[names(color_class_heter) %in% unique(class_df_selected$Class)]
+
+# Step 3: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+  distinct(Sample_ID, Depth) %>%
+  arrange(Sample_ID) %>%
+  deframe()  # named vector: names = Sample_ID, values = Depth
+
+# Step 4: Plot
+g <- ggplot(data = class_df_selected, aes(x = Sample_ID, y = n_reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  scale_fill_manual(values = color_class_selected) +
+  scale_x_discrete(labels = depth_labels) +  # show Depth instead of Sample_ID
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(cols = vars(Day), scales = "free_x", space = "free_x", switch = "x") +
+   labs(x = "Sampling day by depth (m)") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 90, color = "black"),
+    axis.text.y = element_text(size = 12),
+    strip.placement = "outside",
+    strip.background.x = element_blank(),
+    strip.text = element_text(size = 12,angle = 90, color = "black", face = "bold"),
+    panel.spacing.x = unit(0, "pt"),
+    legend.position = "bottom"
+  ) +
+  ggtitle("Heterotrophic protists - TAN1901") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Step 5: Save
+ggsave("Top12_protistheter_selectedSAMPDEPTH_TAN1901.png", plot = g, width = 12, height = 7, dpi = 300, bg = "white")
+#---------------------------------------------------------------------------------------------------------
+
+# Step 1: Filter and prep the data
+selected_cruises <- c("TAN2101")
+class_df_selected <- class_df_Top12_protist_heter %>%
+  filter(Cruise.TAN %in% selected_cruises) %>%
+  mutate(
+    CTD_number = as.character(CTD_number),
+    Depth = as.character(Depth),
+    Sample_ID = factor(Sample_ID, levels = unique(Sample_ID))  # keep bar order consistent
+  )
+
+# Step 2: Prepare color palette
+color_class_selected <- color_class_heter[names(color_class_heter) %in% unique(class_df_selected$Class)]
+
+# Step 3: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+distinct(Sample_ID, Depth) %>%
+arrange(Sample_ID) %>%
+ deframe()  # named vector: names = Sample_ID, values = Depth
+
+# Step 4: Plot
+g <- ggplot(data = class_df_selected, aes(x = Sample_ID, y = n_reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  scale_fill_manual(values = color_class_selected) +
+  scale_x_discrete(labels = depth_labels) +  # show Depth instead of Sample_ID
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(cols = vars(CTD_number), scales = "free_x", space = "free_x", switch = "x") +
+   labs(x = "CTD number by depth (m)") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 90, color = "black"),
+    axis.text.y = element_text(size = 12),
+    strip.placement = "outside",
+    strip.background.x = element_blank(),
+    strip.text = element_text(size = 12, color = "black", face = "bold"),
+    panel.spacing.x = unit(0, "pt"),
+    legend.position = "bottom"
+  ) +
+  ggtitle("Heterotrophic protists - 2101") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Step 5: Save
+ggsave("Top12_protistheter_selected_2101.png", plot = g, width = 12, height = 7, dpi = 300, bg = "white")
+
+##
+selected_cruises <- c("TAN2101")
+desired_day_order <- paste("Day", 1:31)
+
+class_df_selected <- class_df_Top12_protist_heter %>%
+  filter(Cruise.TAN %in% selected_cruises) %>%
+  mutate(
+    Day = gsub("\\s+", " ", trimws(Day)),  # Remove extra spaces
+    Day = factor(Day, levels = desired_day_order),
+    Depth = as.character(Depth)
+  ) %>%
+  arrange(Day, Sample_ID) %>%
+  mutate(
+    Sample_ID = factor(Sample_ID, levels = unique(Sample_ID))
+  )
+
+
+# Step 2: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+  distinct(Sample_ID, Depth) %>%
+  deframe()
+
+# Step 2: Prepare color palette
+color_class_selected <- color_class_heter[names(color_class_heter) %in% unique(class_df_selected$Class)]
+
+# Step 3: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+  distinct(Sample_ID, Depth) %>%
+  arrange(Sample_ID) %>%
+  deframe()  # named vector: names = Sample_ID, values = Depth
+
+# Step 4: Plot
+g <- ggplot(data = class_df_selected, aes(x = Sample_ID, y = n_reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  scale_fill_manual(values = color_class_selected) +
+  scale_x_discrete(labels = depth_labels) +  # show Depth instead of Sample_ID
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(cols = vars(Day), scales = "free_x", space = "free_x", switch = "x") +
+   labs(x = "Sampling day by depth (m)") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 90, color = "black"),
+    axis.text.y = element_text(size = 12),
+    strip.placement = "outside",
+    strip.background.x = element_blank(),
+    strip.text = element_text(size = 12,angle = 90, color = "black", face = "bold"),
+    panel.spacing.x = unit(0, "pt"),
+    legend.position = "bottom"
+  ) +
+  ggtitle("Heterotrophic protists - TAN2101") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Step 5: Save
+ggsave("Top12_protistheter_selectedSAMPDEPTH_TAN2101.png", plot = g, width = 12, height = 7, dpi = 300, bg = "white")
+#---------------------------------------------------------------------------------------------------------
+
+# Step 1: Filter and prep the data
+selected_cruises <- c("KAH1303")
+class_df_selected <- class_df_Top12_protist_heter %>%
+  filter(Cruise.TAN %in% selected_cruises) %>%
+  mutate(
+    CTD_number = as.character(Day),
+    Depth = as.character(Depth),
+    Sample_ID = factor(Sample_ID, levels = unique(Sample_ID))  # keep bar order consistent
+  )
+
+# Step 2: Prepare color palette
+color_class_selected <- color_class_heter[names(color_class_heter) %in% unique(class_df_selected$Class)]
+
+# Step 3: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+  distinct(Sample_ID, Depth) %>%
+  arrange(Sample_ID) %>%
+  deframe()  # named vector: names = Sample_ID, values = Depth
+
+# Step 4: Plot
+g <- ggplot(data = class_df_selected, aes(x = Sample_ID, y = n_reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  scale_fill_manual(values = color_class_selected) +
+  scale_x_discrete(labels = depth_labels) +  # show Depth instead of Sample_ID
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(cols = vars(Day), scales = "free_x", space = "free_x", switch = "x") +
+   labs(x = "Sampling day by depth (m)") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 90, color = "black"),
+    axis.text.y = element_text(size = 12),
+    strip.placement = "outside",
+    strip.background.x = element_blank(),
+    strip.text = element_text(size = 12, color = "black", face = "bold"),
+    panel.spacing.x = unit(0, "pt"),
+    legend.position = "bottom"
+  ) +
+  ggtitle("Heterotrophic protists - KAH1303") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Step 5: Save
+ggsave("Top12_protistheter_selected_KAH1303.png", plot = g, width = 12, height = 7, dpi = 300, bg = "white")
+#---------------------------------------------------------------------------------------------------------
+
+# Step 1: Filter and prep the data
+selected_cruises <- c("TAN1203")
+class_df_selected <- class_df_Top12_protist_heter %>%
+  filter(Cruise.TAN %in% selected_cruises) %>%
+  mutate(
+    CTD_number = as.character(Day),
+    Depth = as.character(Depth),
+    Sample_ID = factor(Sample_ID, levels = unique(Sample_ID))  # keep bar order consistent
+  )
+
+# Step 2: Prepare color palette
+color_class_selected <- color_class_heter[names(color_class_heter) %in% unique(class_df_selected$Class)]
+
+
+# Step 4: Plot
+g <- ggplot(data = class_df_selected, aes(x = Sample_ID, y = n_reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  scale_fill_manual(values = color_class_selected) +
+  #scale_x_discrete(labels = Sample_ID) +  # show Sample_ID instead of depth because I only have the nominal depth.
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(cols = vars(Day), scales = "free_x", space = "free_x", switch = "x") +
+   labs(x = "Sampling day") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 90, color = "black"),
+    axis.text.y = element_text(size = 12),
+    strip.placement = "outside",
+    strip.background.x = element_blank(),
+    strip.text = element_text(size = 12, color = "black", face = "bold"),
+    panel.spacing.x = unit(0, "pt"),
+    legend.position = "bottom"
+  ) +
+  ggtitle("Heterotrophic protists - TAN1203") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Step 5: Save
+ggsave("Top12_protistheter_selected_TAN1203.png", plot = g, width = 12, height = 7, dpi = 300, bg = "white")
+#---------------------------------------------------------------------------------------------------------
+
+# Step 1: Filter and prep the data
+selected_cruises <- c("TAN1212")
+desired_day_order <- paste("Day", 1:16)
+
+class_df_selected <- class_df_Top12_protist_heter %>%
+  filter(Cruise.TAN %in% selected_cruises) %>%
+  mutate(
+   Day = gsub("\\s+", " ", trimws(Day)),  # Remove extra spaces
+    Day = factor(Day, levels = desired_day_order),
+    Depth = as.character(Depth)
+  ) %>%
+  arrange(Day, Sample_ID) %>%
+  mutate(Sample_ID = factor(Sample_ID, levels = unique(Sample_ID)))
+
+# Step 2: Prepare color palette
+color_class_selected <- color_class_heter[names(color_class_heter) %in% unique(class_df_selected$Class)]
+
+
+# Step 4: Plot
+g <- ggplot(data = class_df_selected, aes(x = Sample_ID, y = n_reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  scale_fill_manual(values = color_class_selected) +
+  #scale_x_discrete(labels = Sample_ID) +  # show Sample_ID instead of depth because I only have the nominal depth.
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(cols = vars(Day), scales = "free_x", space = "free_x", switch = "x") +
+   labs(x = "Sampling day") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 90, color = "black"),
+    axis.text.y = element_text(size = 12),
+    strip.placement = "outside",
+    strip.background.x = element_blank(),
+    strip.text = element_text(size = 12, color = "black", face = "bold"),
+    panel.spacing.x = unit(0, "pt"),
+    legend.position = "bottom"
+  ) +
+  ggtitle("Heterotrophic protists - TAN1212") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Step 5: Save
+ggsave("Top12_protistheter_selected_TAN1212.png", plot = g, width = 12, height = 7, dpi = 300, bg = "white")
+#---------------------------------------------------------------------------------------------------------
+
+# Step 1: Filter and prep the data
+selected_cruises <- c("TAN1516")
+desired_day_order <- paste("Day", 1:17)
+
+class_df_selected <- class_df_Top12_protist_heter %>%
+  filter(Cruise.TAN %in% selected_cruises) %>%
+  mutate(
+    Day = factor(Day, levels = desired_day_order),
+    Depth = as.character(Depth)
+  ) %>%
+  arrange(Day, Sample_ID) %>%  # arrange by day and then sample
+  mutate(
+    Sample_ID = factor(Sample_ID, levels = unique(Sample_ID))  # reorder Sample_IDs to reflect Day order
+  )
+
+# Step 2: Prepare color palette
+color_class_selected <- color_class_heter[names(color_class_heter) %in% unique(class_df_selected$Class)]
+
+
+# Step 4: Plot
+g <- ggplot(data = class_df_selected, aes(x = Sample_ID, y = n_reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  scale_fill_manual(values = color_class_selected) +
+  #scale_x_discrete(labels = Sample_ID) +  # show Sample_ID instead of depth because I only have the nominal depth.
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(cols = vars(Day), scales = "free_x", space = "free_x", switch = "x") +
+   labs(x = "Sampling day") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 90, color = "black"),
+    axis.text.y = element_text(size = 12),
+    strip.placement = "outside",
+    strip.background.x = element_blank(),
+    strip.text = element_text(size = 12, color = "black", face = "bold"),
+    panel.spacing.x = unit(0, "pt"),
+    legend.position = "bottom"
+  ) +
+  ggtitle("Heterotrophic protists - TAN1516") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Step 5: Save
+ggsave("Top12_protistheter_selected_TAN1516.png", plot = g, width = 12, height = 7, dpi = 300, bg = "white")
+#---------------------------------------------------------------------------------------------------------
+
+
+# Step 1: Filter and prep the data
+selected_cruises <- c("TAN1702")
+class_df_selected <- class_df_Top12_protist_heter %>%
+  filter(Cruise.TAN %in% selected_cruises) %>%
+  mutate(
+    CTD_number = as.character(CTD_number),
+    Depth = as.character(Depth),
+    Sample_ID = factor(Sample_ID, levels = unique(Sample_ID))  # keep bar order consistent
+  )
+
+# Step 2: Prepare color palette
+color_class_selected <- color_class_heter[names(color_class_heter) %in% unique(class_df_selected$Class)]
+
+# Step 3: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+  distinct(Sample_ID, Depth) %>%
+  arrange(Sample_ID) %>%
+  deframe()  # named vector: names = Sample_ID, values = Depth
+
+# Step 4: Plot
+g <- ggplot(data = class_df_selected, aes(x = Sample_ID, y = n_reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  scale_fill_manual(values = color_class_selected) +
+  scale_x_discrete(labels = depth_labels) +  # show Depth instead of Sample_ID
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(cols = vars(CTD_number), scales = "free_x", space = "free_x", switch = "x") +
+   labs(x = "CTD number by depth (m)") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 90, color = "black"),
+    axis.text.y = element_text(size = 12),
+    strip.placement = "outside",
+    strip.background.x = element_blank(),
+    strip.text = element_text(size = 12, color = "black", face = "bold"),
+    panel.spacing.x = unit(0, "pt"),
+    legend.position = "bottom"
+  ) +
+  ggtitle("Heterotrophic protists - 1702") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Step 5: Save
+ggsave("Top12_protistheter_selected_1702.png", plot = g, width = 12, height = 7, dpi = 300, bg = "white")
+
+##
+
+selected_cruises <- c("TAN1702")
+desired_day_order <- paste("Day", 1:31)
+
+class_df_selected <- class_df_Top12_protist_heter %>%
+  filter(Cruise.TAN %in% selected_cruises) %>%
+  mutate(
+    Day = gsub("\\s+", " ", trimws(Day)),  # Remove extra spaces
+    Day = factor(Day, levels = desired_day_order),
+    Depth = as.character(Depth)
+  ) %>%
+  arrange(Day, Sample_ID) %>%
+  mutate(
+    Sample_ID = factor(Sample_ID, levels = unique(Sample_ID))
+  )
+
+
+# Step 2: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+  distinct(Sample_ID, Depth) %>%
+  deframe()
+
+# Step 2: Prepare color palette
+color_class_selected <- color_class_heter[names(color_class_heter) %in% unique(class_df_selected$Class)]
+
+# Step 3: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+  distinct(Sample_ID, Depth) %>%
+  arrange(Sample_ID) %>%
+  deframe()  # named vector: names = Sample_ID, values = Depth
+
+# Step 4: Plot
+g <- ggplot(data = class_df_selected, aes(x = Sample_ID, y = n_reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  scale_fill_manual(values = color_class_selected) +
+  scale_x_discrete(labels = depth_labels) +  # show Depth instead of Sample_ID
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(cols = vars(Day), scales = "free_x", space = "free_x", switch = "x") +
+   labs(x = "Sampling day by depth (m)") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 90, color = "black"),
+    axis.text.y = element_text(size = 12),
+    strip.placement = "outside",
+    strip.background.x = element_blank(),
+    strip.text = element_text(size = 12, color = "black", face = "bold"),
+    panel.spacing.x = unit(0, "pt"),
+    legend.position = "bottom"
+  ) +
+  ggtitle("Heterotrophic protists - TAN1702") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Step 5: Save
+ggsave("Top12_protistheter_selectedSAMPDEPTH_TAN1702.png", plot = g, width = 12, height = 7, dpi = 300, bg = "white")
+#---------------------------------------------------------------------------------------------------------
+# Step 1: Filter and prep the data
+selected_cruises <- c("TAN1810")
+desired_day_order <- paste("Day", 1:17)
+
+class_df_selected <- class_df_Top12_protist_heter %>%
+  filter(Cruise.TAN %in% selected_cruises) %>%
+  mutate(
+    Day = factor(Day, levels = desired_day_order),
+    Depth = as.character(Depth)
+  ) %>%
+  arrange(Day, Sample_ID) %>%  # arrange by day and then sample
+  mutate(
+    Sample_ID = factor(Sample_ID, levels = unique(Sample_ID))  # reorder Sample_IDs to reflect Day order
+  )
+
+# Step 2: Create depth label vector (named with Sample_ID levels)
+depth_labels <- class_df_selected %>%
+  distinct(Sample_ID, Depth) %>%
+  deframe()
+
+# Step 3: Prepare color palette
+color_class_selected <- color_class_heter[names(color_class_heter) %in% unique(class_df_selected$Class)]
+
+# Step 4: Plot
+g <- ggplot(data = class_df_selected, aes(x = Sample_ID, y = n_reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  scale_fill_manual(values = color_class_selected) +
+  scale_x_discrete(labels = depth_labels) +
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(cols = vars(Day), scales = "free_x", space = "free_x", switch = "x") +
+  labs(x = "Sampling day") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 90, color = "black"),
+    axis.text.y = element_text(size = 12),
+    strip.placement = "outside",
+    strip.background.x = element_blank(),
+    strip.text = element_text(size = 12, color = "black", face = "bold"),
+    panel.spacing.x = unit(0, "pt"),
+    legend.position = "bottom"
+  ) +
+  ggtitle("Heterotrophic protists - TAN1810") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Step 5: Save
+ggsave("Top12_protistheter_selected_TAN1810.png", plot = g, width = 12, height = 7, dpi = 300, bg = "white")
+
+
+```
+
+
+
+
+
+
+
+
+#alpha diversity
+```{r}
+
+EEZ_euphotic_heter <-  ps_protist_heter %>%  subset_samples(photic_zone== "Euphotic")
+
+EEZ_euphotic_autot <-  ps_protist_autot %>%  subset_samples(photic_zone== "Euphotic")
+
+STW_euphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Euphotic") 
+
+STF_euphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Euphotic") 
+
+SAW_euphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Euphotic") 
+
+
+
+```
+# Creating lists for some specific cases - WATER MASSES - APHOTIC
+
+
+```{r pressure, echo=FALSE}
+
+EEZ_aphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Aphotic")
+
+STW_aphotic <- ps_protist_heter %>%  subset_samples(photic_zone== "Aphotic") 
+
+STF_aphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Aphotic") 
+
+SAW_aphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Aphotic") 
+
+
+```
+
+```{r}
+#### WATER MASS  & AREA DIVERSITY
+
+## EUPHOTIC - Water mass - FIGURE 3
+
+# Remove samples with NA in 'Area'
+ps_protist_heter_clean <- subset_samples(ps_protist_heter, !is.na(Area))
+ps_protist_heter_clean <- subset_samples(ps_protist_heter_clean, !is.na(Season))
+ps_protist_heter_clean <- subset_samples(ps_protist_heter_clean, !is.na(photic_zone))
+
+# Use euphotic or all (euphotic + aphotic)
+
+CairoPDF(file = "Protist.Diversity_HET_Water.Mass", width = 10, height = 5) 
+    plot_richness(ps_protist_heter_clean, x="Water_mass", color="Water_mass", measures = c("Observed","Shannon"), title = "Protist Heterotrophics") + geom_boxplot(alpha= 0.8, outlier.size = 0.2, position=position_dodge(.9)) +
+        geom_point(size = 0.1) +
+          #scale_color_manual(values = Water_mass_colors) +
+        theme_bw() +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+dev.off()
+
+```
+
+
+```{r}
+## BPM Euphotic - SEASONAL ##
+
+#Remove samples with NA in 'Season'
+ps_protist_heter <- subset_samples(ps_protist_heter, !is.na(Season))
+#EEZ_euphotic_heter <- subset_samples(EEZ_euphotic_heter, !is.na(Area))
+ps_protist_heter <- subset_samples(ps_protist_heter, !is.na(photic_zone))
+
+#CairoPDF(file = "R.Figures/Richness/Protist.Diversity_Euphotic_SEASONAL", width = 10, height = 5) 
+   v <-  plot_richness( ps_protist_heter_clean, x="Water_mass", color="Season", measures = c("Observed","Shannon"), title = "Protist HET - SEASONAL") + geom_boxplot(alpha= 0.8, outlier.size = 0.2, position=position_dodge(.9)) +
+        geom_point(size = 0.1) +
+         # scale_color_manual(values = Season_colors) +
+        theme_bw() +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+#dev.off()
+
+v
+v$layers <- v$layers[-1]
+v
+v$layers <- v$layers[-2]
+v
+
+ggsave("Protist.Diversity_het_SEASONAL.pdf", dpi = 300,  width = 10, height = 5)
+
+```
+
+```{r}
+# Use euphotic or all (euphotic + aphotic)
+
+
+## BPM Euphotic - SEASONAL ##
+
+#CairoPDF(file = "R.Figures/Richness/Protist.Diversity_Euphotic_SEASONAL", width = 10, height = 5) 
+v <-  plot_richness( ps_protist_heter_clean, x="Water_mass", color="photic_zone", measures = c("Observed","Shannon"), title = "Protist HET -  Photic zone") + geom_boxplot(alpha= 0.8, outlier.size = 0.2, position=position_dodge(.9)) +
+        geom_point(size = 0.1) +
+         # scale_color_manual(values = Season_colors) +
+        theme_bw() +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+#dev.off()
+
+v
+v$layers <- v$layers[-1]
+v
+v$layers <- v$layers[-2]
+v
+
+ggsave("Protist.Diversity_het_photic_zone.pdf", dpi = 300,  width = 10, height = 5)
+
+```
+
+```{r}
+# Get the sample metadata
+meta <- sample_data(ps_protist_heter) %>% data.frame()
+
+# Check the unique values and counts in the depth zone column
+table(meta$photic_zone)
+#Aphotic Euphotic 
+#  119      547 
+
+v <- plot_richness( ps_protist_heter, x="photic_zone", color="photic_zone", measures = c("Observed","Shannon"), title = "Protist Heterotrophics") + geom_boxplot(alpha= 0.8, outlier.size = 0.2, position=position_dodge(.9)) +
+        geom_point(size = 0.1) +
+          #scale_color_manual(values = Water_mass_colors) +
+        theme_bw() +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+
+v
+v$layers <- v$layers[-1]
+v
+v$layers <- v$layers[-2]
+v
+
+ggsave("Protist.Diversity_HET_photic.pdf", dpi = 300,  width = 10, height = 5)
+ 
+```
+```{r}
+# Pull tax_table as dataframe
+tax_df <- as.data.frame(tax_table(ps_protist))
+
+# Get OTUs for each trophic mode
+auto_otus <- rownames(tax_df[tax_df$trophic_mode == "photosynthetic", ])
+hetero_otus <- rownames(tax_df[tax_df$trophic_mode == "heterotrophic", ])
+mixo_otus <- rownames(tax_df[tax_df$trophic_mode == "mixotrophic", ])
+
+# Subset the full phyloseq object
+ps_autotroph <- prune_taxa(auto_otus, ps_protist)
+ps_heterotroph <- prune_taxa(hetero_otus, ps_protist)
+ps_mixotroph <- prune_taxa(mixo_otus, ps_protist)
+
+# Alpha diversity for autotrophs
+alpha_auto <- estimate_richness(ps_autotroph, measures = c("Shannon")) %>%
+  rownames_to_column("file_code") %>%
+  mutate(trophic_mode = "photosynthetic")
+
+# Alpha diversity for heterotrophs
+alpha_hetero <- estimate_richness(ps_heterotroph, measures = c("Shannon")) %>%
+  rownames_to_column("file_code") %>%
+  mutate(trophic_mode = "heterotrophic")
+
+# Alpha diversity for mixotrophs
+alpha_mixo <- estimate_richness(ps_mixotroph, measures = c("Shannon")) %>%
+  rownames_to_column("file_code") %>%
+  mutate(trophic_mode = "mixotrophic")
+
+# Combine
+alpha_combined <- bind_rows(alpha_auto, alpha_hetero,alpha_mixo)
+
+
+meta_df <- data.frame(sample_data(ps_protist)) %>%
+  rownames_to_column("file_code") %>%
+  select(file_code, Water_mass, photic_zone)
+
+# Join metadata
+alpha_final <- left_join(alpha_combined, meta_df, by = "file_code")
+
+
+ggplot(alpha_final %>% filter(photic_zone == "Euphotic"),
+       aes(x = Water_mass, y = Shannon, color = trophic_mode)) +
+  geom_boxplot(alpha = 0.75) +
+  stat_summary(fun = mean, geom = "point", shape = 21, color = "black", size = 2,
+               position = position_dodge(width = 0.75)) +
+  labs(title = "Shannon Diversity (Euphotic Only)",
+       x = "Water Mass", y = "Shannon Index", fill = "Trophic Mode") +geom_boxplot(alpha= 0.8, outlier.size = 0.5)+
+  scale_fill_manual(values = c("photosynthetic" = "#1b9e77", "heterotrophic" = "#d95f02","mixotrophic" = "#7570b3")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Save plot
+ggsave("Shannon_ALL_TrophicMode_WaterMass_eup.pdf", width = 12, height = 6, dpi = 300)
+
+
+
+ggplot(alpha_final,
+       aes(x = Water_mass, y = Shannon, color = trophic_mode)) +
+  geom_boxplot(alpha = 0.75) +
+  stat_summary(fun = mean, geom = "point", shape = 21, color = "black", size = 2,
+               position = position_dodge(width = 0.75)) +
+  labs(title = "Shannon Diversity (ALL DEPTHS)",
+       x = "Water Mass", y = "Shannon Index", fill = "Trophic Mode") +geom_boxplot(alpha= 0.8, outlier.size = 0.5)+
+  scale_fill_manual(values = c("photosynthetic" = "#1b9e77", "heterotrophic" = "#d95f02","mixotrophic" = "#7570b3")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+#Covariation
+```{r}
+# Reshape to wide format: one Shannon column per trophic mode
+alpha_final_wide <- alpha_final %>%
+  select(file_code, Shannon, trophic_mode) %>%
+  pivot_wider(names_from = trophic_mode, values_from = Shannon,
+              names_prefix = "Shannon_")
+
+
+#Heterotrophic vsPhotosynthetic
+cor.test(alpha_final_wide$Shannon_heterotrophic, alpha_final_wide$Shannon_photosynthetic, method = "pearson")
+
+#Pearson's product-moment correlation
+
+#data:  alpha_final_wide$Shannon_heterotrophic and alpha_final_wide$Shannon_photosynthetic
+#t = 19.877, df = 669, p-value < 2.2e-16
+#alternative hypothesis: true correlation is not equal to 0
+#95 percent confidence interval:
+# 0.5594581 0.6548314
+#sample estimates:
+#      cor 
+#0.6093441 
+
+#Heterotrophic vs Mixotrophic
+cor.test(alpha_final_wide$Shannon_heterotrophic, alpha_final_wide$Shannon_mixotrophic, method = "pearson")
+
+#	Pearson's product-moment correlation
+#data:  alpha_final_wide$Shannon_heterotrophic and alpha_final_wide$Shannon_mixotrophic
+#t = 26.207, df = 669, p-value < 2.2e-16
+#alternative hypothesis: true correlation is not equal to 0
+#95 percent confidence interval:
+# 0.6722677 0.7471781
+#sample estimates:
+#      cor 
+#0.7117406 
+
+#Photosynthetic vs mixotrophic
+cor.test(alpha_final_wide$Shannon_photosynthetic, alpha_final_wide$Shannon_mixotrophic, method = "pearson")
+
+#	Pearson's product-moment correlation
+#data:  alpha_final_wide$Shannon_photosynthetic and alpha_final_wide$Shannon_mixotrophic
+#t = 26.228, df = 669, p-value < 2.2e-16
+#alternative hypothesis: true correlation is not equal to 0
+#95 percent confidence interval:
+# 0.6725743 0.7474252
+#sample estimates:
+#      cor 
+#0.7120166
+
+# Subset only Shannon columns
+shannon_df <- alpha_final_wide[, c("Shannon_heterotrophic", "Shannon_mixotrophic", "Shannon_photosynthetic")]
+
+# Compute correlation matrix
+cor_matrix <- cor(shannon_df, method = "pearson", use = "complete.obs")
+
+# Rename row and column names for clarity in the plot
+colnames(cor_matrix) <- c("Heterotrophic", "Mixotrophic", "Photosynthetic")
+rownames(cor_matrix) <- c("Heterotrophic", "Mixotrophic", "Photosynthetic")
+
+# Plot
+# Save the correlation plot as a PNG file
+png("Pairwise.png", width = 12, height = 7, units = "in", res = 300, bg = "white")
+corrplot(cor_matrix, method = "circle", type = "upper",
+         tl.col = "black", addCoef.col = "black", 
+         number.cex = 0.8, 
+         col = colorRampPalette(c("blue", "white", "red"))(200))
+dev.off()
+
+
+# Only required columns
+shannon_df <- alpha_final_wide[, c("Shannon_heterotrophic", "Shannon_mixotrophic", "Shannon_photosynthetic")]
+
+
+# Plot pairwise scatterplots
+ggpairs(shannon_df, 
+        lower = list(continuous = wrap("smooth", method = "lm", se = FALSE, color = "steelblue")),
+        upper = list(continuous = wrap("cor", size = 4)),
+        diag = list(continuous = wrap("densityDiag", alpha = 0.5)))
+
+```
+
+
+
+#############################  continuous data to discrete ###################################
+“How does heterotrophic protist diversity in the euphotic zone change as we move from south to north (latitude), and is this change related to chlorophyll levels?”
+
+```{r}
+
+#I will extracting the sample data from the phyloseq object, create the Ranking columns and then import the new coluns in the phyloseq object 
+Euphotic_ranks <- sample_data(EEZ_euphotic_heter) %>%
+  data.frame() %>%
+  mutate(
+    RankLat1 = cut(Lat, breaks = c(-80, -75, -70, -65, -60, -55, -50, -45, -40, -35, -30),
+                   labels = c("-80","-70", "-65", "-60", "-55", "-50", "-45", "-40", "-35", "-30"),
+                   include.lowest = TRUE),
+    RankLat2 = ntile(Lat, 20),
+    RankChla = ntile(Chla_total, 4)) %>%
+  select(Samples, RankLat1, RankLat2,RankChla) %>%
+  distinct(Samples, .keep_all = TRUE)
+
+#Adding the new columns in the metadata
+meta_orig <- sample_data(EEZ_euphotic_heter) %>% data.frame()
+
+Euphotic_ranks$RankChla=as.factor(Euphotic_ranks$RankChla)
+Euphotic_ranks$RankLat1=as.factor(Euphotic_ranks$RankLat1)
+Euphotic_ranks$RankLat2=as.factor(Euphotic_ranks$RankLat2)
+
+meta_merged <- left_join(meta_orig, Euphotic_ranks, by = "Samples")
+rownames(meta_merged) <- meta_merged$Samples 
+
+sample_data(EEZ_euphotic_heter) <- sample_data(meta_merged)
+
+
+
+# Check value ranges for each chlorophyll rank
+sample_data(EEZ_euphotic_heter) %>%
+  data.frame() %>%
+  group_by(RankChla) %>%
+  summarise(
+    Min_Chla = min(Chla_total, na.rm = TRUE),
+    Max_Chla = max(Chla_total, na.rm = TRUE),
+    Mean_Chla = mean(Chla_total, na.rm = TRUE),
+    n_samples = n()
+  )
+
+
+
+# Extract sample data as dataframe
+meta_df <- sample_data(EEZ_euphotic_heter) %>%
+  data.frame()
+
+# Add sample names as a column
+meta_df$Samples <- rownames(meta_df)
+
+# Reorder if you want Samples first (optional)
+meta_df <- meta_df %>%
+  select(Samples, everything())
+
+# Write to Excel
+write.xlsx(meta_df, file = "EEZ_euphotic_heter_metadata.xlsx", rowNames = FALSE)
+# convert integer to factor and levels
+#Euphotic_rankss$RankChla=as.factor(Euphotic_rankss$RankChla)
+#Euphotic_rankss$RankNO3=as.factor(Euphotic_rankss$RankNO3) 
+#Euphotic_rankss$RankDRSi=as.factor(Euphotic_rankss$RankDRSi) 
+
+
+```
+
+How protist heterotroph diversity in the euphotic zone changes along latitude and potentially relates to chlorophyll concentration?
+```{r}
+#CairoPDF(file = "R.Figures/Richness/Protist.Diversity_EUPHOTIC_Latitude1_Area2_March2022", width = 10, height = 5) 
+
+EEZ_euphotic_heter <- subset_samples(EEZ_euphotic_heter, !is.na(RankLat1))
+EEZ_euphotic_heter <- subset_samples(EEZ_euphotic_heter, !is.na(RankChla))
+
+# Extract original metadata
+meta_orig <- sample_data(ps_protist_heter) %>% data.frame()
+
+# Merge by 'Samples'
+meta_merged <- left_join(meta_orig, Euphotic_ranks, by = "Samples")
+
+# Set row names back for phyloseq compatibility
+rownames(meta_merged) <- meta_merged$Samples
+
+# Add back to phyloseq object
+sample_data(ps_protist_heter) <- sample_data(meta_merged)
+
+# If 'DepthLayer' or 'Zone' column marks euphotic samples
+ps_euphotic_heter <- subset_samples(ps_protist_heter, photic_zone == "Euphotic")
+
+
+# Estimate richness measures
+richness_df <- estimate_richness(ps_euphotic_heter, measures = c("Observed", "Shannon"))
+
+# Add Sample names as a column
+richness_df$Samples <- rownames(richness_df)
+
+# dont know why the '-' in the rownames are changed into '.' 
+richness_df$Samples <- chartr(".", "-", richness_df$Samples) # changed the naming back so it can be joined with sample_ID from medadata
+rownames(richness_df) <- richness_df$Samples 
+
+# Extract sample data
+meta_df <- sample_data(ps_euphotic_heter) %>% data.frame()
+
+# Merge
+richness_df <- richness_df %>%
+  left_join(meta_df, by = "Samples")
+
+# Find the row with the highest Shannon diversity
+richness_df[which.max(richness_df$Shannon), ]
+
+
+  t <- plot_richness(EEZ_euphotic_heter, x="RankLat1", color="RankChla", measures = c("Observed","Shannon"), title = "Protist Heter - Euphotic - Latitude") + geom_boxplot(alpha= 0.8, outlier.size = 0.2) +
+               # scale_color_manual(values = Area_colors) +
+        geom_point(size = 0.1) +
+        theme_bw() +
+        #scale_x_continuous(limits = c(0, 10)) +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+t
+
+# Save plot
+ggsave("Euph_lat_chlor.pdf", width = 12, height = 6, dpi = 300)
+
+#With lat on x and water mass at y
+  t <- plot_richness(EEZ_euphotic_heter, x="RankLat1", color="Water_mass", measures = c("Observed","Shannon"), title = "Protist Heter - Euphotic - Latitude") + geom_boxplot(alpha= 0.8, outlier.size = 0.2) +
+               # scale_color_manual(values = Area_colors) +
+        geom_point(size = 0.1) +
+        theme_bw() +
+        #scale_x_continuous(limits = c(0, 10)) +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+t
+
+# Save plot
+ggsave("Euph_lat_water.pdf", width = 12, height = 6, dpi = 300)
+
+
+
+#--------------------------------------------------------------------------------------------
+#I suggest using rank latitudes or discrete water masses in the X axis and rank chla concentrations within each of this.         
+richness_df$Lat_Chla_Group <- paste(richness_df$RankLat1, richness_df$RankChla, sep = "_")
+
+sample_data(EEZ_euphotic_heter)$Lat_Chla_Group <- with(sample_data(EEZ_euphotic_heter), paste(RankLat1, RankChla, sep = "_"))
+
+#Compute ranges per rank
+meta_df <- sample_data(EEZ_euphotic_heter) %>% data.frame()
+
+# If Chla_total is a character, convert safely to numeric:
+meta_df$Chla_total <- as.numeric(as.character(meta_df$Chla_total))
+
+# Compute Chl a ranges
+rank_labels <- meta_df %>%
+  group_by(RankChla) %>%
+  summarise(
+    MinChla = round(min(Chla_total, na.rm = TRUE), 2),
+    MaxChla = round(max(Chla_total, na.rm = TRUE), 2)
+  ) %>%
+  mutate(
+    RankChla_label = paste0("Rank ", RankChla, ": ", MinChla, "–", MaxChla, " µg/L")
+  )
+ 
+#Map the new labels to your metadata
+# Create a named vector to relabel
+rank_label_map <- setNames(rank_labels$RankChla_label, rank_labels$RankChla)
+
+# Relabel directly in metadata
+meta_df$RankChlaLabel <- rank_label_map[as.character(meta_df$RankChla)]
+
+# Add back to phyloseq
+sample_data(EEZ_euphotic_heter) <- sample_data(meta_df)
+
+t <- plot_richness(EEZ_euphotic_heter, x="Lat_Chla_Group", color="RankChlaLabel", measures = c("Observed","Shannon"), title = "Protist Heter - Euphotic - Latitude") + geom_boxplot(alpha= 0.8, outlier.size = 0.2) +
+               # scale_color_manual(values = Area_colors) +
+        geom_point(size = 0.1) +
+        theme_bw() +
+        #scale_x_continuous(limits = c(0, 10)) +
+        theme(axis.text.y = element_text(size = 12)) +
+        theme(axis.title.y = element_text(size=12)) +
+        theme(axis.title.x = element_text(size=12)) +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 12))   +
+        theme(legend.title = element_text(color = "blue", size = 12), legend.text = element_text(color = "black", size = 10))
+t + labs(color = "Chlorophyll a Concentration \nRanks (µg/L ranges)") + labs(x = "Latitude Groups (°S) by Chlorophyll a Rank")
+
+ggsave("Euph_lat_wchla_nested.pdf", width = 12, height = 6, dpi = 300)
+
+
+
+
+```
+### Richness vs metadata relationships
+```{r, fig.height=4, fig.width=8}
+
+richness <- estimate_richness(ps_protist_heter,  measures = NULL)
+setDT(richness,keep.rownames = "Samples")
+# dont know why the '-' in the rownames are changed into '.' 
+
+richness$Samples <- chartr(".", "-", richness$Samples) # changed the naming back so it can be joined with sample_ID from medadata
+
+metadata <- read_excel("C:/Anna_Maria_IEO/thesis/tables/phyloseq_export_ps_AMmetadata.xlsx")
+
+metadata_richness <- left_join(metadata, richness, by = "Samples" )
+
+
+# All samples 
+
+all_metadata_richness <- metadata_richness %>%
+  select("Area", "Lat","Temp", "Sal", "Chla_total", "DRSi", "NO3", "DRP":Fisher)
+
+#write.xlsx(all_metadata_richness, file = "PrismFigures/all_metadata_richness.xlsx")
+
+# Euphotic samples
+
+euphotic_metadata_richness <- metadata_richness %>%
+  filter(photic_zone == "Euphotic") %>%
+    select("Area", "Lat","Temp", "Sal", "Chla_total", "DRSi", "NO3", "DRP":Fisher)
+
+#write.xlsx(euphotic_metadata_richness, file = "PrismFigures/euphotic_metadata_richness.xlsx")
+
+
+## Linear regressions - to be ran when completed metadata table
+  
+  ggplot(metadata_richness, aes(Temp, Observed)) +
+  geom_point() +
+  stat_smooth(method = lm)
+  
+  model <- lm(Observed ~ Temp, data = metadata_richness)
+
+  summary(model)
+  
+
+#Call:
+#lm(formula = Observed ~ Temp, data = metadata_richness)
+
+#Residuals:
+#    Min      1Q  Median      3Q     Max 
+#-185.31  -62.25  -19.93   38.06  486.47 
+
+#Coefficients:
+#            Estimate Std. Error t value Pr(>|t|)    
+#(Intercept) 106.3867     6.4151  16.584   <2e-16 ***
+#Temp          6.3774     0.6479   9.843   <2e-16 ***
+#---
+#Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#Residual standard error: 101.6 on 563 degrees of freedom
+#  (1517 observations deleted due to missingness)
+#Multiple R-squared:  0.1468,	Adjusted R-squared:  0.1453 
+#F-statistic: 96.89 on 1 and 563 DF,  p-value: < 2.2e-16
+```
+
+BETA DIVERSITY
+
+## EUPHOTIC
+## PCA ordination - PROTIST - ALL
+### Figure 4A
+```{r pressure, echo=FALSE}
+# perform RDA ordination
+unconstrained_PCA_RDA_protist <-
+  ps_protist_heter %>%
+  #tax_fix()%>%
+  subset_samples(photic_zone == "Euphotic") %>%
+  #tax_filter(min_prevalence = 0.1, tax_level = "Genus") %>%
+  #tax_agg("Genus") %>%
+  tax_transform(trans = "clr") %>%
+  ord_calc(method = "PCA") 
+#> Proportional min_prevalence given: 0.1 --> min 23/222 samples.
+# ord_calc will automatically infer you want a "PCA" here
+# specify explicitly with method = "PCA", or you can pick another method
+
+# create plot
+rda_plot_protist <- unconstrained_PCA_RDA_protist %>%
+  ord_plot(
+    #plot_taxa = 1:10, 
+    colour = "Water_mass", size = 2, shape = "Cruise.TAN",
+    tax_vec_length = 3,
+    auto_caption = TRUE
+  )
+
+# customise plot
+customised_plot_rda_protist <- rda_plot_protist +
+  stat_ellipse(aes(linetype = Water_mass, colour = Water_mass)) +
+  #scale_colour_brewer(palette = "Set1") +
+ # scale_color_manual(values = Water_mass_colors) +
+  scale_shape_manual(values=c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)) 
+ # theme(legend.position = "bottom") 
+
+
+# show plot
+customised_plot_rda_protist
+
+ggsave("PCA_unconstrained_EUPHOTIC_PROTIST.pdf", dpi = 300,  width = 12, height = 8, scale=1.2)
+
+```
+## CONSTRAINED Ordination + PERMANOVA - PROTIST -HETER. I will use the raw environmental NO3 variables
+
+```{r pressure, echo=FALSE}
+#In the metadata, I had some "na" that were confusing, as they were considered as a value and not NA. So, first I am removing na with NA and then I am transforming everything in numeric.
+
+
+# Fix "na" and other problematic strings BEFORE coercion
+sample_data(ps_protist_heter)$NO3[sample_data(ps_protist_heter)$NO3 == "na"] <- NA
+sample_data(ps_protist_heter)$Chla_total[sample_data(ps_protist_heter)$Chla_total == "na"] <- NA
+
+# Now safely convert to numeric
+sample_data(ps_protist_heter)$NO3 <- as.numeric(sample_data(ps_protist_heter)$NO3)
+sample_data(ps_protist_heter)$Chla_total <- as.numeric(sample_data(ps_protist_heter)$Chla_total)
+
+ps_clean <- ps_protist_heter%>%
+  subset_samples(photic_zone == "Euphotic")%>%
+  subset_samples(!is.na(Sal) & !is.na(Temp) & !is.na(NO3) & !is.na(Chla_total)& !is.na(U_Cast))  #I am removing all the samples with no data on these variables. I am also removing the samples with U_Cast with no data, as I want to create median columns for some environmental variables (NO3 and Chla) and thse samples, we can´t group them somehow. They are mainly the TUFsamples and the McClane samples of cruise 1810 that we are missing the environmental data anyway
+table(sample_data(ps_clean)$Cruise.TAN)
+
+
+#Checking how many samples I have per water sample
+table(sample_data(ps_clean)$Water_mass)
+#Antarctic       SAW       STF       STW 
+#      196       97        30        124 
+
+table(sample_data(ps_clean)$Cruise.TAN) # KAH1303 is removed as we don't have any chl info about that cruise.c 
+#TAN1203 TAN1212 TAN1516 TAN1702 TAN1802 TAN1810 TAN1901 TAN2101 
+#      7      69      18      44      35      96      94      84 
+
+# Also remove samples with total counts = 0
+ps_clean <- prune_samples(sample_sums(ps_clean) > 0, ps_clean) #Before I used this line, as I was oing the dist_cal,I                                                                  was getting this message -> Warning: you have empty rows: their dissimilarities may be meaningless in method “bray”Warning: missing values in results. After that, everything seems to work well.
+
+
+Bray_dists <-
+ps_clean%>%
+  #tax_filter(min_prevalence = 0.1, tax_level = "Genus") %>%
+  #tax_agg("Genus") %>%
+  tax_transform("identity") %>%
+  dist_calc("bray")                 #(microViz)
+#> Proportional min_prevalence given: 0.1 --> min 23/222 samples.
+
+perm2 <- dist_permanova(data = Bray_dists, variables = c("Water_mass","Cruise.TAN","Sal", "Temp" ,"NO3", "Chla_total"), seed = 321)
+# Dropping samples with missings: 392   |  Due to having Nas I was obtaining this comment. For that reason, I had to clean the samples with missing values. That´s what I did in the lines above creating ps_clean. After I checked with any(is.na(Bray_dists@dist)) , I ensured that we have no empty data and I proceeded with the analysis.
+# 2025-05-06 15:41:42.123733 - Starting PERMANOVA with 999 perms with 1 processes. 
+
+
+perm_get(perm2) # Permutation test for adonis under reduced model
+#Permutation test for adonis under reduced model
+#Marginal effects of terms
+#Permutation: free
+#Number of permutations: 999
+
+#vegan::adonis2(formula = formula, data = metadata, permutations = n_perms, by = by, parallel = parall)
+#            Df SumOfSqs      R2       F Pr(>F)    
+#Water_mass   3    4.411 0.02725  6.6472  0.001 ***
+#Cruise.TAN   7   22.212 0.13722 14.3438  0.001 ***
+#Sal          1    0.396 0.00244  1.7880  0.007 ** 
+#Temp         1    1.016 0.00628  4.5918  0.001 ***
+#NO3          1    0.751 0.00464  3.3965  0.001 ***
+#Chla_total   1    1.098 0.00679  4.9651  0.001 ***
+#Residual   430   95.124 0.58767                   
+#---
+#Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#PERMONOVA WITH NO CATEGORICAL VARIABLES
+perm2 <- dist_permanova(data = Bray_dists, variables = c("Sal", "Temp" ,"NO3", "Chla_total"), seed = 321)
+# Dropping samples with missings: 392   |  Due to having Nas I was obtaining this comment. For that reason, I had to clean the samples with missing values. That´s what I did in the lines above creating ps_clean. After I checked with any(is.na(Bray_dists@dist)) , I ensured that we have no empty data and I proceeded with the analysis.
+# 2025-05-06 15:41:42.123733 - Starting PERMANOVA with 999 perms with 1 processes. 
+
+
+perm_get(perm2) # Permutation test for adonis under reduced model
+#Permutation test for adonis under reduced model
+#Marginal effects of terms
+#Permutation: free
+#Number of permutations: 999
+
+#vegan::adonis2(formula = formula, data = metadata, permutations = n_perms, by = by, parallel = parall)
+#            Df SumOfSqs      R2       F Pr(>F)
+#Sal          1    1.784 0.01102  6.2051  0.001 ***
+#Temp         1    7.844 0.04846 27.2817  0.001 ***
+#NO3          1    1.379 0.00852  4.7957  0.001 ***
+#Chla_total   1    2.445 0.01510  8.5017  0.001 ***
+#Residual   440  126.515 0.78160                   
+#Total      444  161.866 1.00000    
+
+ord_calc(perm2, constraints = c("Sal","Temp", "NO3","Chla_total")) %>%
+  ord_plot(
+    colour = "Water_mass", size = 2, shape = "Cruise.TAN",
+    constraint_vec_style = list(colour = "black", size = 0.1),
+    constraint_lab_style = list(colour = "black")
+  ) +
+  stat_ellipse(aes(colour = Water_mass)) +
+  #xlim(-3, 3) +  # Adjust these values depending on your data
+  #ylim(-3, 3) +   # Adjust these values depending on your data
+  # scale_color_brewer(palette = "Dark2") +
+ # scale_color_manual(values = Water_mass_colors) +
+  scale_shape_manual(values=c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)) 
+  #scale_shape_manual(values=c(1, 2, 5, 7, 8, 10, 3, 6)) 
+
+#> Centering (mean) and scaling (sd) the constraints and conditions:
+#>  weight
+#>  female
+#,"MLD0.2C"
+#, "MLD0.2C"
+
+
+ggsave("RDA_Bray_contrained_EUPHOTIC_PROTIST_HET_TSal_Chla_NO3_raw.pdf", dpi = 300,  width = 12, height = 8)
+
+```
+
+# PROTIST - SYND --- MARCH 2022
+```{r}
+
+#EUPHOTIC
+ps_protist_euphotic <- ps_clean %>%
+  subset_samples(( photic_zone == "Euphotic" ))
+
+
+  # REMOVE samples that lack environmental variables of interest for the PERMANOVA
+  # Bay of Plenty and TAN1204 Biophysical moorings voyage, TAN1203 SOAP, day 1 of TAN1212 
+
+ps_protist_perm <- ps_protist_euphotic %>%
+  subset_samples((Cruise.TAN != "KAH1303" )) %>%
+  subset_samples((Cruise.TAN != "TAN1204" )) %>%
+  subset_samples((Cruise.TAN != "TAN1203" )) %>%
+  subset_samples((U_Cast != "7802" ))
+
+
+   #Distance
+  df = as(sample_data(ps_protist_perm), "data.frame")
+  bray_dist = phyloseq::distance(ps_protist_perm, method="bray")
+   
+    #PERMANOVA - Only categorical
+  adonis2(bray_dist ~ Water_mass + Area + RankChla1 + dens_layer, df)
+  #adonis(bray_dist ~ dens_layer + ChlaTot + Area2 + Water_mass.TS1, df)
+  
+  #PERMANOVA - Only continuous - median water column
+  adonis2(bray_dist ~ Temp + Sal + NO3 + Chla_total, df)
+  
+    #PERMANOVA -  continuous + Categorical 
+  adonis(bray_dist ~ Water_mass + Area + Temp + Sal + NO3 + Chla_total, df)
+
+```
+

@@ -1,0 +1,408 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+###################DO NOT RUN AGAIN THESE LINES, RUN ONCE TO CREATE THE EXCEL###################################
+```{r}
+
+
+# Read only the "Metadata" sheet from the original Excel file
+metadata <- read_excel("C:/Anna_Maria_IEO/thesis/tables/phyloseq_export_ps_AMCHECK.xlsx", sheet = "Metadata")
+
+
+
+```
+
+
+```{r}
+# Metadata that needs updating
+metadata <- read_excel("C:/Anna_Maria_IEO/thesis/tables/phyloseq_export_ps_AMmeta.xlsx")
+
+# Original data with the correct values
+samples_df <- read_excel("C:/Belli/Antarctic_2024/Belli/Files/samples_df_MLD_March2020.xlsx")
+
+samples_subset <- samples_df %>%
+  select(Sample_ID, NH4, CollectionType,Station,DRSi,dens_layer,Subarea,Chla_total,Chla_02,Chla_2,Chla_20)
+
+# Update NH4 and CollectionType in metadata based on matching Sample_ID
+metadata <- metadata %>%
+  left_join(samples_subset, by = "Sample_ID", suffix = c("", ".new")) %>%
+  mutate(
+    NH4 = ifelse(is.na(NH4), NH4.new, NH4),
+    CollectionType = ifelse(is.na(CollectionType), CollectionType.new, CollectionType),
+    Station = ifelse(is.na(Station), Station.new, Station),
+    DRSi = ifelse(is.na(DRSi), DRSi.new, DRSi),
+    dens_layer = ifelse(is.na(dens_layer), dens_layer.new, dens_layer),
+    Subarea = ifelse(is.na(Subarea), Subarea.new, Subarea),
+    Chla_total = ifelse(is.na(Chla_total), Chla_total.new, Chla_total),
+    Chla_02 = ifelse(is.na(Chla_02), Chla_02.new, Chla_02),
+    Chla_2 = ifelse(is.na(Chla_2), Chla_2.new, Chla_2),
+    Chla_20 = ifelse(is.na(Chla_20), Chla_20.new, Chla_20),
+  ) %>%
+  select(-NH4.new, -CollectionType.new,-Station.new,-DRSi.new,-dens_layer.new,-Subarea.new,-Chla_total.new,-Chla_02.new, -Chla_2.new, -Chla_20.new)
+
+write.xlsx(metadata, "C:/Anna_Maria_IEO/thesis/tables/phyloseq_export_ps_AMmetadata.xlsx",row.names = FALSE)
+
+```
+
+################################################START FROM HERE#################################################
+
+I have already created the phyloseq_export_ps_AMmetadata once so I´m not rerunning the lines above. A started modifying everything directly in excel. TIME CONSUMING BUT EASIER.That´s why I´m importing the new updated excel.
+
+No. Taxa: 104611 .
+No. samples: 2347 
+No. variables: 33
+```{r}
+library(readxl)
+
+# Import the cleaned metadata
+clean_metadata <- read_excel("C:/Anna_Maria_IEO/thesis/tables/phyloseq_export_ps_AMmetadata.xlsx")
+
+ps <- readRDS("C:/Anna_Maria_IEO/thesis/tables/Anna_Maria_merging_the_data.rds")
+
+ps
+```
+Including code in order to incorporate the updated mixoplankton categorization
+```{r}
+# Loading the necessary packages
+
+  library("ggplot2")
+  library("dplyr")
+  library("tidyr")
+  library("DT")
+  library("forcats")
+  library("stringr")
+  library("treemapify")
+  library(patchwork)
+
+  library("pr2database")
+  packageVersion("pr2database")
+
+# Read the PR2 database
+  
+  pr2 <- pr2_database() %>% 
+  # Only keep 18S (do not consider plastids)
+    filter(gene == "18S_rRNA")
+  
+  
+  pr2_mixopk <- pr2 %>% 
+  # Remove sequences for which we have no taxonomy from Silva
+    filter(!is.na(mixoplankton))
+  
+  #Total number of PR2 sequences belonging to mixoplankton : 4282
+  table <- pr2_mixopk %>% 
+  count(mixoplankton)
+
+DT::datatable(table, 
+             caption="Number of sequences for each type of mixoplankton.", 
+             rownames = FALSE)
+
+
+
+mixopl_categories <- pr2_mixopk %>%
+  select(species,mixoplankton)
+
+```
+
+
+
+
+
+```{r}
+# Make sure Sample_ID is rownames 
+rownames(clean_metadata) <- clean_metadata$Samples
+
+otu <- as.data.frame(otu_table(ps))
+tax <- as.data.frame(tax_table(ps))
+
+# Keep only columns (samples) that are in the cleaned metadata
+#otu_filtered <- otu[, colnames(otu) %in% rownames(clean_metadata)]
+# If your OTU table is transposed (samples as rows), adjust accordingly
+otu_filtered <- otu[rownames(otu) %in% rownames(clean_metadata), ]
+```
+# Load the file that assign trophic mode to every PR2 
+```{r}
+  pr2_trophic <- read_excel("C:/Anna_Maria_IEO/thesis/pr2_trophic.xlsx", sheet = "with trophic") %>%
+    select(species, taxon_level, trophic_mode) %>%
+    mutate(trophic_mode = recode(trophic_mode, phytoplankton = "photosynthetic",
+                                 plant = "photosynthetic",
+                                 macroalgae = "photosynthetic",
+                                 mixoplankton = "mixotrophic",
+                                 protozooplankton = "heterotrophic"))
+```  
+
+#preserve ASV before merging
+```{r}
+tax$asv_code <-row.names(tax)
+tax$OTU <- NULL
+```
+
+#Add trophic_mode and the level at which it was assigned (taxon_level) into the taxa table
+#Nas = 63100
+```{r}
+tax<-left_join(tax,pr2_trophic,by = c("Species" = "species") ) 
+
+# reduces data frame to only unique rows (keeps first one of any duplicates)
+tax <- tax[!duplicated(tax$asv_code), ]
+
+# Check NAs in the 'age' column
+sum(is.na(tax$taxon_level))
+
+rownames(tax) <-tax$asv_code
+
+```
+
+Incorporating mixoplankton categorization as a column
+```{r}
+tax<-left_join(tax,mixopl_categories,by = c("Species" = "species") ) 
+
+# reduces data frame to only unique rows (keeps first one of any duplicates)
+tax <- tax[!duplicated(tax$asv_code), ]
+
+# Check NAs in the 'age' column
+sum(is.na(tax$taxon_level))
+
+rownames(tax) <-tax$asv_code
+
+```
+#We have rows with no species in our taxa table, so we will try to fill some of the na with organisms that may have been identified from another taxonomic level. We are doing the same procedure that we did before with the rest taxonomic levels
+
+pr2_trophictry <- read_excel("C:/Anna_Maria_IEO/thesis/pr2_trophic.xlsx", sheet = "with trophic") %>%
+    mutate(trophic_mode = recode(trophic_mode, phytoplankton = "photosynthetic",
+                                 mixoplankton = "mixotrophic",
+                                 protozooplankton = "heterotrophic"))
+
+try1 <- anti_join(tax,pr2_trophic,by = c("Species" = "species"))
+
+#Genus taxonomy level
+pr2_trophicgen <- pr2_trophictry %>%
+  select(genus, taxon_level, trophic_mode)
+ 
+pr2_trophicgen <-  pr2_trophicgen[ pr2_trophicgen$taxon_level == 'genus',]
+  
+try2<- try1 %>%
+  select(Genus, asv_code)
+ 
+genustry<-left_join(try2,pr2_trophicgen,by = c("Genus" = "genus") )
+genustry <- genustry[!duplicated(genustry$asv_code), ]
+
+res <- na.omit(genustry)
+
+#Family taxonomy level
+
+pr2_trophicfam <- pr2_trophictry %>%
+    select(family, taxon_level, trophic_mode)
+ 
+pr2_trophicfam <-  pr2_trophicfam[ pr2_trophicfam$taxon_level == 'family',]
+  
+res <- res %>%
+  select(asv_code)
+ 
+try2 <- try1 %>%
+    select(Family, asv_code)
+try2 <- try2[!try2$asv_code %in% res$asv_code,]
+
+familytry<-left_join(try2,pr2_trophicfam,by = c("Family" = "family") )
+familytry <- familytry[!duplicated(familytry$asv_code), ]
+
+res <- na.omit(familytry)
+
+#Order taxonomy level
+
+pr2_trophicord <- pr2_trophictry %>%
+    select(order, taxon_level, trophic_mode)
+ 
+ pr2_trophicord <-  pr2_trophicord[ pr2_trophicord$taxon_level == 'order',]
+
+res <- res %>%
+select(asv_code)
+ 
+try2 <- try1 %>%
+   select(Order,asv_code)
+
+try2 <- try2[!try2$asv_code %in% res$asv_code,]
+
+ordertry<-left_join(try2,pr2_trophicord,by = c("Order" = "order") )
+ordertry <- ordertry[!duplicated(ordertry$asv_code), ]
+
+res <- na.omit(ordertry)
+
+#Class taxonomy level
+
+pr2_trophiccl <- pr2_trophictry %>%
+    select(class, taxon_level, trophic_mode)
+ 
+pr2_trophiccl <-  pr2_trophiccl[ pr2_trophiccl$taxon_level == 'class',]
+
+res <- res %>%
+select(asv_code)
+ 
+try2 <- try1 %>%
+  select(Class, asv_code)
+try2 <- try2[!try2$asv_code %in% res$asv_code,]
+ 
+classtry<-left_join(try2,pr2_trophiccl,by = c("Class" = "class") )
+classtry <- classtry[!duplicated(classtry$asv_code), ]
+
+res <- na.omit(classtry)
+
+#Division taxonomy level
+
+pr2_trophicdiv <- pr2_trophictry %>%
+    select(division, taxon_level, trophic_mode)
+ 
+pr2_trophicdiv <-  pr2_trophicdiv[ pr2_trophicdiv$taxon_level == 'division',]
+
+res <- res %>%
+   select(asv_code)
+ 
+try2 <- try1 %>%
+    select(Division,asv_code)
+try2 <- try2[!try2$asv_code %in% res$asv_code,]
+ 
+divisiontry<-left_join(try2,pr2_trophicdiv,by = c("Division" = "division") )
+divisiontry<- divisiontry[!duplicated(divisiontry$asv_code), ]
+
+res <- na.omit(divisiontry)
+
+#Supergroup taxonomy level
+
+pr2_trophicsup <- pr2_trophictry %>%
+    select(supergroup,taxon_level, trophic_mode )
+ 
+pr2_trophicsup <-  pr2_trophicsup[ pr2_trophicsup$taxon_level == 'supergroup',]
+ 
+res <- res %>%
+  select(asv_code)
+ 
+try2 <- try1 %>%
+  select(Supergroup,asv_code)
+
+try2 <- try2[!try2$asv_code %in% res$asv_code,]
+
+supergrouptry<-left_join(try2,pr2_trophicsup,by = c("Supergroup" = "supergroup") )
+supergrouptry <- supergrouptry[!duplicated(supergrouptry$asv_code), ]
+
+
+#Merging all the tables so as to combine the datas
+Nas=350891
+``{r}
+taxa1 <- rows_patch(tax, genustry, by = "asv_code")
+taxa1 <- rows_patch(taxa1, familytry, by = "asv_code")
+taxa1 <- rows_patch(taxa1, ordertry, by = "asv_code")
+taxa1 <- rows_patch(taxa1, classtry, by = "asv_code")
+taxa1 <- rows_patch(taxa1, divisiontry, by = "asv_code")
+taxa1 <- rows_patch(taxa1, supergrouptry, by = "asv_code")
+
+# Check NAs in the 'age' column
+sum(is.na(taxa1$taxon_level))
+```
+#Removing the data that we don't need anymore
+```{r}
+remove(genustry,familytry,ordertry,classtry,divisiontry,supergrouptry,pr2_trophicgen,pr2_trophicfam,pr2_trophicord,pr2_trophiccl,pr2_trophicdiv,pr2_trophicsup,res,try1,try2)
+```
+
+#put ASV back as taxa's rowname
+``{r}
+row.names(taxa1)<- taxa1$asv_code
+```
+
+#Separating Syndinales as Syndinales
+```{r}
+#taxa$trophic_mode <- ifelse (taxa$tax.Class=="Syndiniales","syndiniales")
+tax$trophic_mode_2 <- tax$trophic_mode
+tax$trophic_mode_2<- replace (tax$trophic_mode2, tax$Class=="Syndiniales" , "Syndiniales") #This command works for me
+```
+# create a new column for trophic mode, separate dinophyceae
+```{r}
+  #taxa$trophic_mode_2<-ifelse(taxa$class=="Dinophyceae","dinophyceae",taxa$trophic_mode_2)
+tax$trophic_mode_2<- replace (tax$trophic_mode_2, tax$Class=="Dinophyceae" , "Dinophyceae") #This command works for me
+``` 
+#remove asv column since it's already rowname
+```{r}
+tax$asv_code<-NULL
+```
+
+No. taxa = 104611
+No. samples = 2082
+No. variables = 34
+```{r}
+# Convert all back to phyloseq-compatible objects
+OTU <- otu_table(as.matrix(otu_filtered), taxa_are_rows = FALSE)
+TAX <- tax_table(as.matrix(tax))
+META <- sample_data(clean_metadata)
+
+# Make sure everything matches
+OTU <- prune_samples(sample_names(OTU) %in% rownames(clean_metadata), OTU)
+
+row.names(META) <- META$Samples
+#META$Samples <- NULL
+META <- META[sample_names(OTU), ]  # Reorder metadata to match OTU
+
+# Create new phyloseq object
+ps_cleaned <- phyloseq(OTU, TAX, META)
+ps_cleaned
+```
+
+Save the ps object with updated sample_data to be used in the paper
+
+```{r}
+
+saveRDS(ps_cleaned, file = "C:/Anna_Maria_IEO/thesis/tables/Anna_Maria_cleaned_phyloseq.rds")
+
+```
+
+#Visualization of the samples on the map
+
+*I had problems visualizing the sampling in QGIS.
+The package I used, is the Quantarctica generated by the Norwegian Polar Institute (NPI) 
+*** Do not forget to use the citations as they are implying on their read_me document
+
+To solve the problem with the coordinates, I am doing the transformations in R and I´m creating a shapefile already projected to import.
+
+```{r}
+library(sf)
+
+#I´m doing that because if I have NAs in the lat, long columns, the next commands aren´t working.
+
+clean_metadata$Long <- as.numeric(trimws(clean_metadata$Long))
+clean_metadata$Lat <- as.numeric(trimws(clean_metadata$Lat))
+
+data_clean <- clean_metadata[!is.na(clean_metadata$Lat), ]
+#data_clean <- data_clean[!is.na(data$Long), ]
+
+# Create an sf object assuming your columns are named "longitude" and "latitude"
+coords <- st_as_sf(data_clean, coords = c("Long", "Lat"), crs = 4326)  # WGS 84
+
+# Transform the coordinates to EPSG 3031 (Antarctic Polar Stereographic)
+coords_3031 <- st_transform(coords, crs = 3031)
+
+# Check the transformed coordinates
+head(coords_3031)
+
+# Save the transformed data as a shapefile
+st_write(coords_3031, "C:/Anna_Maria_IEO/thesis/GIS/transformed_samples.shp")
+
+```
+I am going to try to reproject the nc file here 
+```{r}
+library(terra)
+
+# Load the SST raster (NetCDF or similar)
+r <- rast("C:/Anna_Maria_IEO/thesis/GIS/TERRA_MODIS.20250423_20250430.L3m.8D.NSST.sst.4km.nc")
+
+crs(r) <- "EPSG:4326"
+
+# Check its original CRS and extent
+crs(r)
+ext(r)
+
+# Reproject to EPSG:3031 (Antarctic Polar Stereographic)
+r_proj <- project(r, "EPSG:3031")
+
+# Save the reprojected raster
+writeRaster(r_proj, "C:/Anna_Maria_IEO/thesis/GIS/SST_reprojected_3031.tif", overwrite = TRUE)
+
+```
+
