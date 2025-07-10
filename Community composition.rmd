@@ -1,3 +1,6 @@
+#   Thesis script, community analysis    #
+#      Anna Maria Mavroselinou           #
+##########################################
 
 #Libraries
 ```{r cars}
