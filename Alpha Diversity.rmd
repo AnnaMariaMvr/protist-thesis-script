@@ -1,4 +1,7 @@
-#alpha diversity
+#   Thesis script, alpha diversity       #
+#      Anna Maria Mavroselinou           #
+##########################################
+
 ```{r cars}
 
 EEZ_euphotic_heter <-  ps_protist_heter %>%  subset_samples(photic_zone== "Euphotic")
