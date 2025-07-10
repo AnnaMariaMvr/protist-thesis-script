@@ -68,8 +68,9 @@ Filtration: removing Biostat,TAN1708 and SEA0201 cruises and keeping only Seawat
 ps_protist_heter
 phyloseq-class experiment-level object
 otu_table()   OTU Table:         [ 13272 taxa and 671 samples ]
-sample_data() Sample Data:       [ 671 samples by 40 sample variables ]
+sample_data() Sample Data:       [ 671 samples by 41 sample variables ]
 tax_table()   Taxonomy Table:    [ 13272 taxa by 12 taxonomic ranks ]
+
 ```{r pressure, echo=FALSE}
   # Keep only protist taxa, remove Metazoa and Fungi, unwanted cruises, and non-seawater samples(I am removing TAN1604 as I only had 6 samples in the NIWA excel)
 ps_protist <- ps_cleaned %>%
@@ -256,6 +257,8 @@ class_df_Top12_protist_heter <- class_df_Top12_protist_heter %>%
       
 ```
 
+
+FIGURE 7
 Relative abundances
 ```{r pressure, echo=FALSE}
 
@@ -297,6 +300,7 @@ for (wm in water_masses) {
       theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 6))
   )
   dev.off()
+
 
   # Treemap PDF
   treemap_data <- class_stats_col %>%
@@ -476,7 +480,7 @@ OTU_abund_top100_protist_eu_SUM <- OTU_abund_top100_protist_eu %>%
 unique(get_variable(OTU_abund_top100_protist_eu_SUM, "Class"))
 ```
 
-
+FIGURE 8
 ```{r}
 # color coding # Water mass - SUM or MEAN
 color_class1 <- as.character(OTU_abund_top100_protist_eu_SUM$color_hex_class)
@@ -511,7 +515,7 @@ for (wm in unique(OTU_abund_top100_protist_eu_SUM$Water_mass)) {
 }
 ```
 
-
+FIGURE 9
 NOW EACH CRUISE SEPERATELY
 ```{r}
 
