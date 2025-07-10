@@ -4,7 +4,7 @@ BETA DIVERSITY
 
 ## EUPHOTIC
 ## PCA ordination - PROTIST - ALL
-### Figure 4A
+### Figure 6
 ```{r pressure, echo=FALSE}
 # perform RDA ordination
 unconstrained_PCA_RDA_protist <-
@@ -142,11 +142,6 @@ ord_calc(perm2, constraints = c("Sal","Temp", "NO3","Chla_total")) %>%
   scale_shape_manual(values=c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)) 
   #scale_shape_manual(values=c(1, 2, 5, 7, 8, 10, 3, 6)) 
 
-#> Centering (mean) and scaling (sd) the constraints and conditions:
-#>  weight
-#>  female
-#,"MLD0.2C"
-#, "MLD0.2C"
 
 
 ggsave("RDA_Bray_contrained_EUPHOTIC_PROTIST_HET_TSal_Chla_NO3_raw.pdf", dpi = 300,  width = 12, height = 8)
