@@ -32,7 +32,8 @@ SAW_aphotic <-  ps_protist_heter %>%  subset_samples(photic_zone== "Aphotic")
 ```{r}
 #### WATER MASS  & AREA DIVERSITY
 
-## EUPHOTIC - Water mass - FIGURE 3
+#FIGURE 3
+## EUPHOTIC - Water mass - FIGURE 
 
 # Remove samples with NA in 'Area'
 ps_protist_heter_clean <- subset_samples(ps_protist_heter, !is.na(Area))
@@ -210,6 +211,8 @@ ggplot(alpha_final,
   theme_bw() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
+
+#FIGURE 5
 #Covariation
 ```{r}
 # Reshape to wide format: one Shannon column per trophic mode
@@ -436,7 +439,8 @@ ggsave("Euph_lat_water.pdf", width = 12, height = 6, dpi = 300)
 
 
 #--------------------------------------------------------------------------------------------
-#I suggest using rank latitudes or discrete water masses in the X axis and rank chla concentrations within each of this.         
+#FIGURE 4
+#Using rank latitudes or discrete water masses in the X axis and rank chla concentrations within each of this.         
 richness_df$Lat_Chla_Group <- paste(richness_df$RankLat1, richness_df$RankChla, sep = "_")
 
 sample_data(EEZ_euphotic_heter)$Lat_Chla_Group <- with(sample_data(EEZ_euphotic_heter), paste(RankLat1, RankChla, sep = "_"))
