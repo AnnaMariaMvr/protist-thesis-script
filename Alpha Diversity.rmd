@@ -423,6 +423,7 @@ t
 # Save plot
 ggsave("Euph_lat_chlor.pdf", width = 12, height = 6, dpi = 300)
 
+#FIGURE 2
 #With lat on x and water mass at y
   t <- plot_richness(EEZ_euphotic_heter, x="RankLat1", color="Water_mass", measures = c("Observed","Shannon"), title = "Protist Heter - Euphotic - Latitude") + geom_boxplot(alpha= 0.8, outlier.size = 0.2) +
                # scale_color_manual(values = Area_colors) +
